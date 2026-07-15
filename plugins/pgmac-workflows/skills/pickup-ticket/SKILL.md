@@ -31,7 +31,7 @@ At skill start, check which model the session is running (stated in the system p
 |---|---|---|
 | TRIVIAL | Mechanical change, docs, config tweak, single-file fix, no design decisions | Haiku — `/model haiku` |
 | STANDARD | Typical feature or bugfix, a few files, tests | Sonnet — `/model sonnet` |
-| COMPLEX | Cross-cutting refactor, unfamiliar subsystem, infra-critical or concurrency work, migration | Opus — `/model opus` |
+| COMPLEX | Cross-cutting refactor, unfamiliar subsystem, infra-critical or concurrency work, migration | Fable 5 — `/model claude-fable-5` (fallback Opus — `/model opus` — when Fable 5 is unavailable) |
 
 ## Phase 1 — Pickup
 
