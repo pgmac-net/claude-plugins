@@ -1,7 +1,7 @@
 ---
 name: pickup-ticket
 description: This skill should be used when the user says "pick up a ticket", "pickup ticket", "work on issue N", "grab homelabia#42", or asks to start work on a GitHub Issue. The ticket reference may arrive as an argument in owner/repo#N form or as a bare issue number.
-version: 2.0.0
+version: 2.1.0
 ---
 
 # Pick Up a Ticket
@@ -17,6 +17,22 @@ Work a GitHub Issue end-to-end: read it, plan, get approval, implement on a bran
 - Use the resolved `owner/repo#N` in every `gh` command below.
 - If the repo isn't cloned locally, clone it first: `pgmac-net/*` repos → `~/pgmac/<repo>`, work repos → `~/projects/<repo>`.
 
+## Model Selection
+
+Planning happens on the most capable model; implementation happens on a cheaper model matched to the ticket's complexity. Claude cannot switch the session's model itself — check the running model at each boundary and ask the user to switch with `/model`. If the user declines a switch, note it and continue on the current model — never block on a model change.
+
+**Planning model (Phases 1–2):** Claude Fable 5 — `/model claude-fable-5`. Fallback: the latest Claude Opus (`/model opus`) if Fable 5 is unavailable (model-not-found error, or absent from the `/model` picker after retirement).
+
+At skill start, check which model the session is running (stated in the system prompt, or via `/status`). If it isn't the planning model, ask: "Planning phase — switch with `/model claude-fable-5` (or `/model opus` if Fable 5 is gone), then say continue." Wait for the switch or a decline before proceeding.
+
+**Complexity tiers** — assigned during Phase 2 as part of the plan. When in doubt between two tiers, pick the higher one.
+
+| Tier | Criteria | Implementation model |
+|---|---|---|
+| TRIVIAL | Mechanical change, docs, config tweak, single-file fix, no design decisions | Haiku — `/model haiku` |
+| STANDARD | Typical feature or bugfix, a few files, tests | Sonnet — `/model sonnet` |
+| COMPLEX | Cross-cutting refactor, unfamiliar subsystem, infra-critical or concurrency work, migration | Opus — `/model opus` |
+
 ## Phase 1 — Pickup
 
 1. Read the ticket and its discussion: `gh issue view <N> --repo <owner>/<repo> --comments`
@@ -27,7 +43,7 @@ Work a GitHub Issue end-to-end: read it, plan, get approval, implement on a bran
 
 ## Phase 2 — Plan and Approval
 
-1. Write an implementation plan.
+1. Write an implementation plan. End it with a complexity line naming the tier and implementation model from the Model Selection table, e.g. `Complexity: STANDARD — implement on Sonnet`. Approving the plan also approves the model choice.
 2. Post it to the ticket: `gh issue comment <N> --repo <owner>/<repo> --body "<plan>"`
 3. Share the ticket URL with the user so they can review the plan.
 4. Iterate on feedback — post each revised plan to the ticket as a new comment.
@@ -35,6 +51,7 @@ Work a GitHub Issue end-to-end: read it, plan, get approval, implement on a bran
 
 ## Phase 3 — Implement
 
+0. Switch to the implementation model: if the session isn't already on the tier model recorded in the approved plan, ask the user to switch (e.g. "Plan rated STANDARD — switch with `/model sonnet`, then say continue") and wait. If the user declines or implementation ends up on a different model than the plan recorded, add a one-line note to the work-started ticket comment.
 1. Confirm the current branch, and that the default branch is up to date (`git checkout main && git pull`). Never commit to main/master.
 2. Create a branch named `<N>-<short-slug>` (e.g. `42-nrpe-watch-stall-check`).
 3. Implement the approved plan.

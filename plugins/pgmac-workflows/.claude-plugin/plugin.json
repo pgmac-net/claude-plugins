@@ -1,7 +1,7 @@
 {
   "name": "pgmac-workflows",
   "description": "Homelab workflow skills: post-incident reviews with Infinite How's analysis, and GitHub Issue ticket pickup with plan approval gates",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "pgmac",
     "url": "https://github.com/pgmac"
