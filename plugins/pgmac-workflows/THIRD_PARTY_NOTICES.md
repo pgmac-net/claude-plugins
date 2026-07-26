@@ -7,6 +7,7 @@
 - **License**: MIT
 - **Vendored at**: upstream v1.2.0
 - **Files**: `skills/grilling/SKILL.md`, `skills/domain-modeling/SKILL.md`, `skills/domain-modeling/CONTEXT-FORMAT.md`, `skills/domain-modeling/ADR-FORMAT.md`
+- **Modified locally**: `skills/domain-modeling/SKILL.md` — one line reworded for brevity (2026-07-26), no behaviour change
 
 ```
 MIT License
