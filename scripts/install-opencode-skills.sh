@@ -73,20 +73,20 @@ mkdir -p "$SKILLS_TARGET_DIR"
 # Install each skill
 count=0
 for name in "${SKILL_NAMES[@]}"; do
-    source="$SKILLS_SOURCE_DIR/$name"
-    target="$SKILLS_TARGET_DIR/$name"
+    source_skill="$SKILLS_SOURCE_DIR/$name"
+    target_skill="$SKILLS_TARGET_DIR/$name"
 
-    if [ -e "$target" ] || [ -L "$target" ]; then
-        if [ ! -L "$target" ]; then
-            echo "Warning: $target exists and is not a symlink. Skipping $name."
+    if [ -e "$target_skill" ] || [ -L "$target_skill" ]; then
+        if [ ! -L "$target_skill" ]; then
+            echo "Warning: $target_skill exists and is not a symlink. Skipping $name."
             continue
         fi
-        rm "$target"
+        rm "$target_skill"
     fi
 
-    ln -s "$source" "$target"
+    ln -s "$source_skill" "$target_skill"
     echo "Installed: $name"
-    ((count++))
+    count=$((count + 1))
 done
 
 echo ""
