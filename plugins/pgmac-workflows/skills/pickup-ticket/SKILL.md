@@ -1,12 +1,12 @@
 ---
 name: pickup-ticket
 description: This skill should be used when the user says "pick up a ticket", "pickup ticket", "work on issue N", "grab homelabia#42", or asks to start work on a GitHub Issue. The ticket reference may arrive as an argument in owner/repo#N form or as a bare issue number.
-version: 2.2.0
+version: 2.3.0
 ---
 
 # Pick Up a Ticket
 
-Work a GitHub Issue end-to-end: read it, grill it, plan, get approval, implement on a branch, raise a PR, document.
+Work a GitHub Issue end-to-end: read it, grill it, plan, get approval, implement on a branch, raise a PR, document, report back on the ticket.
 
 **Hard gate: no implementation work before the user gives express approval of the plan (end of Phase 3). No exceptions — inspection, grilling, and planning only until then.**
 
@@ -63,12 +63,34 @@ Once the ticket and its code touchpoints are understood, run a grilling session 
 1. Confirm the current branch, and that the default branch is up to date (`git checkout main && git pull`). Never commit to main/master.
 2. Create a branch named `<N>-<short-slug>` (e.g. `42-nrpe-watch-stall-check`).
 3. Implement the approved plan.
-4. Comment on the ticket at milestones only — work started, significant deviation from the plan, blocked, complete. No play-by-play.
+4. Comment on the ticket at milestones only — work started, significant deviation from the plan, blocked. No play-by-play; completion is reported in Phase 5.
 
 ## Phase 5 — Deliver
 
 1. Commit to the branch and push.
 2. Raise a PR. Reference the ticket in the PR body as a plain `owner/repo#N` link — not `Closes #N`, since the user closes the ticket themselves after review.
-3. Comment on the ticket: summary of the completed work plus the PR link. Do not close the ticket.
-4. Update the in-repo markdown documentation to reflect any application usage changes.
-5. Create a Notion page describing the work, the process, decisions made, and any deviations from the plan — under the Notion parent page named after the repo, with a markdown copy in the repo's `docs/` directory.
+3. Update the in-repo markdown documentation to reflect any application usage changes.
+4. Create a Notion page describing the work, the process, decisions made, and any deviations from the plan — under the Notion parent page named after the repo, with a markdown copy in the repo's `docs/` directory.
+5. Post the completion comment (below). Mandatory — the ticket is not done until it's posted. Do not close the ticket.
+
+### Completion comment
+
+`gh issue comment <N> --repo <owner>/<repo> --body "<comment>"`
+
+    ## Work complete
+
+    <2-4 sentence summary of what changed and why>
+
+    **Pull requests**
+    - owner/repo#123 — <title>
+
+    **Deviations from plan**
+    - <or "None">
+
+    **Docs**
+    - <docs/ path or Notion link, if updated>
+
+    **Follow-ups**
+    - <or "None">
+
+List every PR raised for the ticket, one per line. If no PR was raised, replace the section body with a one-line reason.
