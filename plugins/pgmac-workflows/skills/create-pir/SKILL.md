@@ -1,7 +1,7 @@
 ---
 name: create-pir
 description: This skill should be used when the user says "create a PIR", "write a post-incident review", "generate an incident report", "document this incident", "write a post-mortem", "capture this incident", or asks to create formal incident documentation from the current session. Trigger whenever an incident has been resolved and the user wants structured documentation.
-version: 1.4.0
+version: 1.5.0
 ---
 
 # Create Post-Incident Review (PIR)
@@ -25,7 +25,7 @@ Create a formal PIR from the current Claude session: apply Infinite How's root c
 1. **Extract** incident metadata, timeline, root-cause chains, and action items from the conversation.
 2. **Root-cause** each chain with Infinite How's (methodology: `references/infinite-hows.md`).
 3. **Name** the document — filename and title conventions.
-4. **Write** the PIR against the template, with MkDocs frontmatter tags.
+4. **Write** the PIR against the template, with MkDocs frontmatter — `title`, `date`, `severity` (`P1`–`P4`), `duration`, `resolution`, `impact`, `tags`.
 5. **Runbooks** — decide create / extend / skip per failure chain, using the runbook template.
 6. **Issues** — one GitHub Issue per action item (repo selection and format: `references/github-issues-setup.md`).
 7. **Back-fill** the `ISSUE-XXX` placeholders in the PIR with real issue links.
