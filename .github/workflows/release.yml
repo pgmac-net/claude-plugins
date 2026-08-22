@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Confirm tag is at HEAD of main
+        id: check
+        run: |
+          git fetch origin main --quiet
+          main_sha="$(git rev-parse origin/main)"
+          tag_sha="$(git rev-parse "$GITHUB_REF_NAME")"
+          if [ "$tag_sha" != "$main_sha" ]; then
+            echo "::notice::$GITHUB_REF_NAME ($tag_sha) is not HEAD of main ($main_sha) — skipping release. Tag a commit already merged to main's tip to cut a release."
+            echo "on_head=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "on_head=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        if: steps.check.outputs.on_head == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+
+          # %(contents) on a signed annotated tag includes the PGP block;
+          # subject+body excludes it and matches how git log shows the message.
+          subject="$(git tag -l --format='%(contents:subject)' "$tag")"
+          body="$(git tag -l --format='%(contents:body)' "$tag")"
+          if [ -n "$body" ]; then
+            message="$subject"$'\n\n'"$body"
+          else
+            message="$subject"
+          fi
+
+          # generate_release_notes prepends `body` to GitHub's auto-generated
+          # commit/PR changelog rather than replacing it.
+          gh api "repos/${{ github.repository }}/releases" \
+            -f tag_name="$tag" \
+            -f name="$tag" \
+            -f body="$message" \
+            -F generate_release_notes=true \
+            -F draft=false \
+            -F prerelease=false
