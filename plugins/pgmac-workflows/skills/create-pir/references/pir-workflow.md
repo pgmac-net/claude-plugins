@@ -9,8 +9,10 @@ Read the full conversation history to collect:
 **Metadata to find:**
 - Incident date (when it occurred, not today unless it happened today)
 - Start time and resolution time → calculate duration
-- Severity: Critical / High / Medium / Low (guide is in the PIR template)
-- Status: Resolved / Partially Resolved / Monitoring
+- Severity: P1 / P2 / P3 / P4 (criteria table is in the PIR template)
+- Resolution: Resolved / Partially Resolved / Monitoring
+- A short, date-prefixed nav title (`YYYY-MM-DD [short label]`) distinct from the long H1
+- Impact: one or two sentences on what the incident actually cost
 - Affected services, pods, and Kubernetes nodes
 
 **Timeline events (AEST = UTC+10):**
@@ -73,18 +75,30 @@ Filename: `YYYY-MM-DD-<slug>.md`
 - Slug: lowercase, hyphens, 3–6 words summarising the incident
 - Example: `2026-05-18-k8s03-kine-watch-vxlan-corruption.md`
 
-Title: `[Affected System] [Root Problem] — [Technical Detail]`
+H1 title (long, descriptive): `[Affected System] [Root Problem] — [Technical Detail]`
 - Example: `k8s03 Extended Recovery — kine Watch Corruption and VXLAN Route Blackhole`
+
+Frontmatter `title` (short nav label, date-prefixed — **not** the H1): `YYYY-MM-DD [short label]`
+- Example: `2026-08-15 hal NFS handle invalidation`
+- Without this the nav falls back to the H1 and the sidebar becomes a column of near-identical `Post Incident Review: …` entries.
 
 ## Step 4 — Write the PIR Document
 
 Read the template and section guidance at `/home/paul/pgmac/incidents/src/doc-templates/pir-template.md` before writing. Write the PIR to:
 `/home/paul/pgmac/incidents/src/incidents/<filename>.md`
 
-**MkDocs frontmatter tags** — include all relevant:
+**Frontmatter is the source of truth for PIR metadata** — the site renders the severity badge and header block from it, not from prose under the H1. Full field table and the P1–P4 criteria table: `pir-template.md`.
+
+- Six keys plus `tags`: `title`, `date`, `severity`, `duration` are build-required (`main.py` fails the build if any is missing); `resolution`, `impact` are optional.
+- `severity` must be exactly `P1`, `P2`, `P3`, or `P4` — anything else fails the build. Criteria for which level: `pir-template.md`.
+- **`resolution`, never `status`.** `status` is reserved by Material for MkDocs — it maps to an `extra.status` nav icon, renders silently (the build still succeeds), and `main.py` rejects it outright to make the mistake loud.
+- **`title` is the nav label, not the H1** — see Step 3.
+- **Never write metadata as prose under the H1.** The old four bold lines (`**Date:**`, `**Duration:**`, `**Severity:**`, `**Status:**`) are gone; the header block is generated from frontmatter.
+
+**Tags** — include all relevant:
 - Nodes: `k8s01`, `k8s02`, `k8s03`
-- Technologies: `calico`, `kine`, `dqlite`, `kubelet`, `containerd`, `argocd`, `openebs`
-- Failure types: `watch-stream`, `vxlan`, `ipam`, `pleg`, `crash-loop`, `oom`
+- Technologies: `calico`, `kine`, `dqlite`, `kubelet`, `containerd`, `argocd`, `openebs`, `jiva`
+- Failure types: `watch-stream`, `vxlan`, `ipam`, `pleg`, `crash-loop`, `oom`, `cni`
 - Domain: `networking`, `storage`, `scheduling`
 
 Leave Action Items table issue links as `ISSUE-XXX` placeholders — fill in after creating issues in Step 6.
@@ -155,17 +169,23 @@ Also add links in the Preventive Measures section where each action references a
 
 ## Step 8 — Update the Incidents Index
 
-Edit `/home/paul/pgmac/incidents/src/incidents/index.md`. Insert a new row at the **top** of the table (newest-first):
+Edit `/home/paul/pgmac/incidents/src/incidents/index.md`. Insert a new row at the **top** of the table (newest-first). Column order is `Date | Sev | Title | Duration` and severity is a badge span, lowercase class + uppercase text:
 ```
-| YYYY-MM-DD | [Full PIR Title](filename.md) | Severity | ~Xh Ym |
+| YYYY-MM-DD | <span class="sev sev--p2">P2</span> | [Full PIR Title](filename.md) | ~Xh Ym |
 ```
 
-Duration format: `~2h10m`, `~45m`, `~7h`, `~3 days` — match the style of existing rows.
+Duration format: `~2h10m`, `~45m`, `~7h`, `~3 days` — match the style of existing rows. This is the headline figure only; frontmatter `duration` may carry a fuller form after a `;` (the index table truncates there).
 
-## Step 9 — Branch, Commit, Push, PR
+## Step 9 — Verify, Branch, Commit, Push, PR
 
 ```bash
 cd /home/paul/pgmac/incidents
+
+# Validate before committing — main.py fails the build on bad
+# frontmatter (missing required field, severity outside P1-P4, or
+# a 'status' key), and CI runs the same check with warnings as
+# errors. Catch it here, not in the PR.
+mise run build-strict
 
 # Ensure main is up to date
 git checkout main && git pull
@@ -214,14 +234,18 @@ EOF
 Before committing, verify every item:
 
 **PIR:**
+- [ ] `mise run build-strict` passes
+- [ ] Frontmatter carries `title`, `date`, `severity`, `duration` (build-required) plus `resolution`, `impact`, `tags`
+- [ ] `resolution` used, never `status`
+- [ ] `title` is short and date-prefixed (nav label); H1 stays long and descriptive
+- [ ] No bold metadata lines (`**Date:**` etc.) under the H1 — header block is rendered from frontmatter
 - [ ] All template sections filled — no placeholder text or TODO markers
 - [ ] Timeline entries use AEST times consistently throughout
 - [ ] Each Infinite How's chain drills to a systemic/actionable root cause (not just proximate cause)
 - [ ] Infinite How's chains labelled Chain 1, Chain 2, etc. with descriptive subtitles
 - [ ] Action Items table has real GitHub Issue links (not placeholders)
 - [ ] Frontmatter tags cover all affected nodes and technologies
-- [ ] Index row: correct date, title matches H1, links to correct filename, duration matches metadata
-- [ ] Severity in index row matches severity in document metadata
+- [ ] Index row: correct date, badge severity matches frontmatter `severity`, title links to correct filename, duration matches metadata
 - [ ] Executive Summary mentions all three key elements: what happened, why, what fixed it
 - [ ] Lessons Learned has both "What Went Well" and "What Didn't Go Well" sections
 

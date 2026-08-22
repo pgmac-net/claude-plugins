@@ -44,6 +44,18 @@ This issue was created from PIR: [PIR Title](https://github.com/pgmac-net/incide
 
 <High | Medium | Low> (from PIR — only include this section if no matching priority/severity label exists on the repo)
 
+**Action priority is not incident severity.** The PIR's `severity` frontmatter grades how bad the incident was, on the `P1`–`P4` scale. This grades how urgently the follow-up work should be done, and stays on `High`/`Medium`/`Low` because it maps to the repo's priority labels. A `P1` incident can produce a `Low`-priority action item, and a `P3` can produce a `High`-priority one.
+
+On `pgmac-net/homelabia`, map to the existing labels:
+
+| Priority | Label |
+|---|---|
+| High | `priority:high` |
+| Medium | `priority:medium` |
+| Low | `priority:low` |
+
+`priority:urgent` sits above this scale — it's for issues more urgent than any PIR action item, so PIR-derived items don't use it.
+
 ## Acceptance Criteria
 
 - [ ] [Specific measurable outcome 1]
