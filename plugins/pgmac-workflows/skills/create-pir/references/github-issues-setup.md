@@ -30,6 +30,15 @@ Check labels before applying one — do not invent labels that don't exist on th
 gh label list --repo <owner>/<repo>
 ```
 
+**The one exception: `incident`.** Every action item created from a PIR that traces back to a live incident (i.e. an incident tracking issue exists — see `start-incident`) gets the `incident` label, creating it in the target repo first if missing, with this exact spec so it matches across repos:
+```bash
+gh label create incident --repo <owner>/<repo> \
+  --color b60205 \
+  --description "Work arising from a production incident" \
+  2>/dev/null || true
+```
+Every other label still must pre-exist — this exception is scoped to `incident` alone, not a general license to invent labels.
+
 **Recommended description format:**
 ```markdown
 ## Context
@@ -77,6 +86,14 @@ In Preventive Measures section:
 - Action: Add NRPE check
 - Issue: [pgmac-net/homelabia#42](https://github.com/pgmac-net/homelabia/issues/42)
 ```
+
+## Linking Back to the Incident Tracking Issue
+
+When an action item traces back to a live incident, also link the other direction — from the new action-item issue back to the incident tracking issue in `pgmac-net/incidents` — by adding a line to the description's `## Context` section:
+```markdown
+Discovered while working pgmac-net/incidents#<N>.
+```
+This is separate from the PIR-workflow's own Step 10, which comments on the incident issue listing every action item created — the two links together make the relationship navigable in both directions.
 
 ## Issue Title Conventions
 
