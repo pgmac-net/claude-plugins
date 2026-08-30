@@ -13,9 +13,13 @@ $ScriptName = Split-Path -Leaf $PSCommandPath
 
 $SkillNames = @(
     "create-pir"
+    "start-incident"
     "pickup-ticket"
     "grilling"
     "domain-modeling"
+    "grill-with-docs"
+    "grill-me"
+    "context-engineering"
 )
 
 function Show-Help {

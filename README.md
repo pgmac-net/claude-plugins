@@ -47,6 +47,7 @@ Install the skills globally so they're available in any project.
 3. Symlink each skill:
    ```bash
    ln -sfn ~/pgmac/claude-plugins/plugins/pgmac-workflows/skills/create-pir           ~/.config/opencode/skills/create-pir
+   ln -sfn ~/pgmac/claude-plugins/plugins/pgmac-workflows/skills/start-incident       ~/.config/opencode/skills/start-incident
    ln -sfn ~/pgmac/claude-plugins/plugins/pgmac-workflows/skills/pickup-ticket        ~/.config/opencode/skills/pickup-ticket
    ln -sfn ~/pgmac/claude-plugins/plugins/pgmac-workflows/skills/grilling             ~/.config/opencode/skills/grilling
    ln -sfn ~/pgmac/claude-plugins/plugins/pgmac-workflows/skills/domain-modeling      ~/.config/opencode/skills/domain-modeling
@@ -71,6 +72,7 @@ or
 **Manual:**
 ```bash
 rm -rf ~/.config/opencode/skills/create-pir \
+      ~/.config/opencode/skills/start-incident \
       ~/.config/opencode/skills/pickup-ticket \
       ~/.config/opencode/skills/grilling \
       ~/.config/opencode/skills/domain-modeling \
@@ -91,7 +93,8 @@ Fork this repo, add or modify skills under `plugins/<your-plugin>/skills/`, then
 
 | Skill | Purpose |
 |---|---|
-| `create-pir` | Generate a post-incident review from the current session: Infinite How's root cause analysis, runbook evaluation, GitHub Issues for action items, commit + PR. Assumes the [incidents](https://github.com/pgmac-net/incidents) repo layout at `~/pgmac/incidents`. |
+| `create-pir` | Generate a post-incident review from the current session: Infinite How's root cause analysis, runbook evaluation, GitHub Issues for action items, commit + PR. Assumes the [incidents](https://github.com/pgmac-net/incidents) repo layout at `~/pgmac/incidents`. Reads a `start-incident` tracking issue as its primary source when one exists. |
+| `start-incident` | Work a live homelab incident as a Senior/Staff SRE: open a tracking issue immediately, triage via Nagios/Slack, match a runbook, gate every mutating action on confirmation, and leave a structured timeline that `create-pir` consumes directly once resolved. |
 | `pickup-ticket` | Work a GitHub Issue end-to-end: read, grill, plan, post plan to the issue for approval, implement on a branch, raise a PR, and post a completion summary back to the issue. Hard gate — no implementation before plan approval. |
 | `grilling` | Interview relentlessly about a plan or design, one question at a time, until shared understanding is reached. |
 | `domain-modeling` | Build and sharpen a project's `CONTEXT.md` glossary and ADRs as terminology and hard-to-reverse decisions crystallise. |

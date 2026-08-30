@@ -7,9 +7,13 @@ SKILLS_TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills"
 
 SKILL_NAMES=(
     create-pir
+    start-incident
     pickup-ticket
     grilling
     domain-modeling
+    grill-with-docs
+    grill-me
+    context-engineering
 )
 
 show_help() {
@@ -35,7 +39,7 @@ do_uninstall() {
         if [ -L "$target" ]; then
             rm "$target"
             echo "Removed: $target"
-            ((count++))
+            count=$((count + 1))
         fi
     done
     if [ "$count" -eq 0 ]; then

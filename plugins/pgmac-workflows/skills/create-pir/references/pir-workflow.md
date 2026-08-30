@@ -2,9 +2,17 @@
 
 The step-by-step procedure. Read `pir-template.md` and `runbook-template.md` (paths in SKILL.md) before writing either document — they carry the section-by-section guidance.
 
-## Step 1 — Extract Incident Details from Conversation
+## Step 1 — Extract Incident Details
 
-Read the full conversation history to collect:
+**If an incident tracking issue exists** (created by `start-incident`, or passed as an argument), it is the **primary source** — read it first:
+
+```bash
+gh issue view <N> --repo pgmac-net/incidents --comments
+```
+
+The issue body carries stable metadata (detected time, provisional severity, affected scope, matched runbook); the comments carry an AEST-timestamped timeline of diagnostic steps, mutations, and their effects. Use the conversation to corroborate and fill gaps the timeline didn't capture (root-cause reasoning in particular — timeline comments record *what* happened, not always *why*).
+
+**With no incident issue**, extraction falls back to the conversation alone, as before.
 
 **Metadata to find:**
 - Incident date (when it occurred, not today unless it happened today)
@@ -152,8 +160,8 @@ Read `github-issues-setup.md` first — it has the repo-selection table, issue d
 For each action item in the PIR (including any "create runbook" action items, which are now satisfied):
 
 1. Pick the target repo per the reference's selection table; default to `pgmac-net/homelabia` when no single repo owns the work.
-2. Check existing labels (`gh label list --repo <owner>/<repo>`) and apply a matching priority/severity label if one exists — do not invent new labels.
-3. Create the issue with `gh issue create`, using the description format from the reference (root cause chain addressed, link to PIR, runbook link if one was created, priority in body only when no matching label exists).
+2. Check existing labels (`gh label list --repo <owner>/<repo>`) and apply a matching priority/severity label if one exists — do not invent new labels, **with one exception**: apply the `incident` label, creating it in the target repo first if it doesn't exist yet (spec and command: `github-issues-setup.md`).
+3. Create the issue with `gh issue create`, using the description format from the reference (root cause chain addressed, link to PIR, link back to the incident tracking issue if one exists, runbook link if one was created, priority in body only when no matching label exists).
 4. Record each new issue's `owner/repo#N` reference and URL (the `gh issue create` output prints the URL directly).
 
 ## Step 7 — Back-Fill GitHub Issue Links into PIR
@@ -229,6 +237,27 @@ EOF
 )"
 ```
 
+## Step 10 — Link Back to the Incident Issue
+
+If an incident tracking issue exists, comment on it — don't close it, that's a human decision after review:
+
+```bash
+gh issue comment <N> --repo pgmac-net/incidents --body "$(cat <<'EOF'
+## PIR complete
+
+- PIR: [<title>](https://github.com/pgmac-net/incidents/blob/main/src/incidents/<filename>.md)
+- PR: <pr-url>
+- Action items:
+  - owner/repo#N — <title>
+  - ...
+
+This issue stays open for review; close it once satisfied.
+EOF
+)"
+```
+
+Skip this step entirely when there was no incident issue — nothing to link back to.
+
 ## Quality Checklist
 
 Before committing, verify every item:
@@ -259,3 +288,9 @@ Before committing, verify every item:
 - [ ] Verification section confirms resolution with concrete checks
 - [ ] If multi-mode: Quick Reference table is updated to include the new failure mode
 - [ ] If extending an existing runbook: the new failure mode section follows the same style as existing modes
+
+**Incident issue (if one exists):**
+- [ ] Step 1 read it (`gh issue view --comments`) as the primary source before extraction
+- [ ] Every action-item issue links back to it
+- [ ] Step 10's link-back comment posted, listing the PIR, PR, and every action-item issue
+- [ ] It was **not** closed
