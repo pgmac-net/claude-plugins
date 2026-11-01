@@ -4,7 +4,7 @@ The hold-all record for one incident. Created immediately in Phase 1, before dia
 
 ## The `incident` Label
 
-Every issue created during an incident — the hold-all itself, and any follow-up issue discovered while working it — carries the `incident` label. This is the **one exception** to the "never invent a label that doesn't exist on the target repo" rule that `create-pir` and `pickup-ticket` otherwise follow. Create it if missing, with this exact spec so it matches across repos:
+Every issue created during an incident — the hold-all itself, and any follow-up issue discovered while working it — carries the `incident` label. This is an exception to the "never invent a label that doesn't exist on the target repo" rule that `create-pir` and `pickup-ticket` otherwise follow (`pickup-ticket` has one other: its three state labels). Create it if missing, with this exact spec so it matches across repos:
 
 ```bash
 gh label create incident \

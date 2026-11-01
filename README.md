@@ -95,7 +95,7 @@ Fork this repo, add or modify skills under `plugins/<your-plugin>/skills/`, then
 |---|---|
 | `create-pir` | Generate a post-incident review from the current session: Infinite How's root cause analysis, runbook evaluation, GitHub Issues for action items, commit + PR. Assumes the [incidents](https://github.com/pgmac-net/incidents) repo layout at `~/pgmac/incidents`. Reads a `start-incident` tracking issue as its primary source when one exists. |
 | `start-incident` | Work a live homelab incident as a Senior/Staff SRE: open a tracking issue immediately, triage via Nagios/Slack, match a runbook, gate every mutating action on confirmation, and leave a structured timeline that `create-pir` consumes directly once resolved. |
-| `pickup-ticket` | Work a GitHub Issue end-to-end: read, grill, plan, post plan to the issue for approval, implement on a branch, raise a PR, and post a completion summary back to the issue. Hard gate — no implementation before plan approval. |
+| `pickup-ticket` | Work a GitHub Issue end-to-end: read, grill, plan, post plan to the issue for approval, implement on a branch, raise a PR, and post a completion summary back to the issue. Hard gate — no implementation before plan approval. Tracks progress with `in-progress` / `blocked` / `in-review` state labels, creating them if the repo lacks them. |
 | `grilling` | Interview relentlessly about a plan or design, one question at a time, until shared understanding is reached. |
 | `domain-modeling` | Build and sharpen a project's `CONTEXT.md` glossary and ADRs as terminology and hard-to-reverse decisions crystallise. |
 | `grill-with-docs` | `grilling` + `domain-modeling` together — a grill session that also writes the glossary/ADRs as it goes. |
