@@ -22,7 +22,9 @@ jobs:
         run: |
           git fetch origin main --quiet
           main_sha="$(git rev-parse origin/main)"
-          tag_sha="$(git rev-parse "$GITHUB_REF_NAME")"
+          # ^{commit} dereferences annotated/signed tags to the commit they
+          # point at; a bare rev-parse returns the tag object's own SHA.
+          tag_sha="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
           if [ "$tag_sha" != "$main_sha" ]; then
             echo "::notice::$GITHUB_REF_NAME ($tag_sha) is not HEAD of main ($main_sha) — skipping release. Tag a commit already merged to main's tip to cut a release."
             echo "on_head=false" >> "$GITHUB_OUTPUT"
