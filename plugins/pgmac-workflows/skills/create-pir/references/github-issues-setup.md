@@ -30,14 +30,14 @@ Check labels before applying one — do not invent labels that don't exist on th
 gh label list --repo <owner>/<repo>
 ```
 
-**The one exception: `incident`.** Every action item created from a PIR that traces back to a live incident (i.e. an incident tracking issue exists — see `start-incident`) gets the `incident` label, creating it in the target repo first if missing, with this exact spec so it matches across repos:
+**The exception: `incident`.** Every action item created from a PIR that traces back to a live incident (i.e. an incident tracking issue exists — see `start-incident`) gets the `incident` label, creating it in the target repo first if missing, with this exact spec so it matches across repos:
 ```bash
 gh label create incident --repo <owner>/<repo> \
   --color b60205 \
   --description "Work arising from a production incident" \
   2>/dev/null || true
 ```
-Every other label still must pre-exist — this exception is scoped to `incident` alone, not a general license to invent labels.
+Every other label still must pre-exist — this exception is scoped to `incident` alone, not a general license to invent labels. (`pickup-ticket` has its own separate exception for state labels; it does not apply here.)
 
 **Recommended description format:**
 ```markdown

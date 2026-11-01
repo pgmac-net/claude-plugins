@@ -1,7 +1,7 @@
 ---
 name: pickup-ticket
 description: This skill should be used when the user says "pick up a ticket", "pickup ticket", "work on issue N", "grab homelabia#42", or asks to start work on a GitHub Issue. The ticket reference may arrive as an argument in owner/repo#N form or as a bare issue number.
-version: 2.3.0
+version: 2.4.0
 ---
 
 # Pick Up a Ticket
@@ -35,9 +35,11 @@ At skill start, check which model the session is running (stated in the system p
 
 ## Phase 1 — Pickup
 
+State labels (`in-progress`, `in-review`, `blocked`) are the only labels this skill may create; every other label must already exist. Spec, naming and swap commands: `references/state-labels.md`.
+
 1. Read the ticket and its discussion: `gh issue view <N> --repo <owner>/<repo> --comments`
 2. Assign it to yourself: `gh issue edit <N> --repo <owner>/<repo> --add-assignee @me`
-3. Mark it in progress: check `gh label list --repo <owner>/<repo>` for an `in-progress` label or existing equivalent and apply it. If none exists, skip — do not invent new labels.
+3. Mark it in progress: resolve, creating if missing, and apply the `in-progress` state label per `references/state-labels.md`. Labelling is the one repo mutation allowed before the Phase 3 gate.
 4. Inspect the relevant code until the ticket's scope and touchpoints are understood.
 
 ## Phase 2 — Grill the Ticket
@@ -64,11 +66,12 @@ Once the ticket and its code touchpoints are understood, run a grilling session 
 2. Create a branch named `<N>-<short-slug>` (e.g. `42-nrpe-watch-stall-check`).
 3. Implement the approved plan.
 4. Comment on the ticket at milestones only — work started, significant deviation from the plan, blocked. No play-by-play; completion is reported in Phase 5.
+5. When blocked, swap `in-progress` for `blocked`; swap back when unblocked (`references/state-labels.md`).
 
 ## Phase 5 — Deliver
 
 1. Commit to the branch and push.
-2. Raise a PR. Reference the ticket in the PR body as a plain `owner/repo#N` link — not `Closes #N`, since the user closes the ticket themselves after review.
+2. Raise a PR. Reference the ticket in the PR body as a plain `owner/repo#N` link — not `Closes #N`, since the user closes the ticket themselves after review. Then swap the ticket's `in-progress` label for `in-review` (`references/state-labels.md`).
 3. Update the in-repo markdown documentation to reflect any application usage changes.
 4. Create a Notion page describing the work, the process, decisions made, and any deviations from the plan — under the Notion parent page named after the repo, with a markdown copy in the repo's `docs/` directory.
 5. Post the completion comment (below). Mandatory — the ticket is not done until it's posted. Do not close the ticket.
