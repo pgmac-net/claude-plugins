@@ -1,7 +1,7 @@
 ---
 name: pickup-ticket
 description: This skill should be used when the user says "pick up a ticket", "pickup ticket", "work on issue N", "grab homelabia#42", or asks to start work on a GitHub Issue. The ticket reference may arrive as an argument in owner/repo#N form or as a bare issue number.
-version: 2.4.0
+version: 2.5.0
 ---
 
 # Pick Up a Ticket
@@ -19,19 +19,30 @@ Work a GitHub Issue end-to-end: read it, grill it, plan, get approval, implement
 
 ## Model Selection
 
-Planning happens on the most capable model; implementation happens on a cheaper model matched to the ticket's complexity. Claude cannot switch the session's model itself — check the running model at each boundary and ask the user to switch with `/model`. If the user declines a switch, note it and continue on the current model — never block on a model change.
+Planning happens on the most capable model; implementation happens on a cheaper model matched to the ticket's complexity. The agent cannot switch the session's model itself — check the running model at each boundary and ask the user to switch with `/model`. If the user declines a switch, note it and continue on the current model — never block on a model change.
 
-**Planning model (Phases 1–3):** Claude Fable 5 — `/model claude-fable-5`. Fallback: the latest Claude Opus (`/model opus`) if Fable 5 is unavailable (model-not-found error, or absent from the `/model` picker after retirement).
+**Switch commands** — give the command for the harness the session runs in. Pi sets `PI_CODING_AGENT=true` in the shell environment; anywhere else, use the Claude Code column. Pi needs the full `provider/id`: a bare `/model opus` fuzzy-matches across providers and can land on a non-Claude model.
 
-At skill start, check which model the session is running (stated in the system prompt, or via `/status`). If it isn't the planning model, ask: "Planning phase — switch with `/model claude-fable-5` (or `/model opus` if Fable 5 is gone), then say continue." Wait for the switch or a decline before proceeding.
+| Model | Claude Code | Pi (pi-claude-bridge) |
+|---|---|---|
+| Fable 5 | `/model claude-fable-5` | `/model claude-bridge/claude-fable-5` |
+| Opus | `/model opus` | `/model claude-bridge/claude-opus-5-5` |
+| Sonnet | `/model sonnet` | `/model claude-bridge/claude-sonnet-5-5` |
+| Haiku | `/model haiku` | `/model claude-bridge/claude-haiku-5-5` |
+
+The Pi IDs are pinned versions, not aliases — if one is missing from Pi's `/model` picker, offer the newest `claude-bridge` model of the same family instead.
+
+**Planning model (Phases 1–3):** Fable 5. Fallback: the latest Opus if Fable 5 is unavailable (model-not-found error, or absent from the `/model` picker after retirement).
+
+At skill start, check which model the session is running (stated in the system prompt, `/status` in Claude Code, or the footer in Pi — ask the user if unsure). If it isn't the planning model, ask: "Planning phase — switch with `<Fable 5 command>` (or `<Opus command>` if Fable 5 is gone), then say continue." Wait for the switch or a decline before proceeding.
 
 **Complexity tiers** — assigned during Phase 3 as part of the plan. When in doubt between two tiers, pick the higher one.
 
 | Tier | Criteria | Implementation model |
 |---|---|---|
-| TRIVIAL | Mechanical change, docs, config tweak, single-file fix, no design decisions | Haiku — `/model haiku` |
-| STANDARD | Typical feature or bugfix, a few files, tests | Sonnet — `/model sonnet` |
-| COMPLEX | Cross-cutting refactor, unfamiliar subsystem, infra-critical or concurrency work, migration | Fable 5 — `/model claude-fable-5` (fallback Opus — `/model opus` — when Fable 5 is unavailable) |
+| TRIVIAL | Mechanical change, docs, config tweak, single-file fix, no design decisions | Haiku |
+| STANDARD | Typical feature or bugfix, a few files, tests | Sonnet |
+| COMPLEX | Cross-cutting refactor, unfamiliar subsystem, infra-critical or concurrency work, migration | Fable 5 (fallback Opus when Fable 5 is unavailable) |
 
 ## Phase 1 — Pickup
 
@@ -61,7 +72,7 @@ Once the ticket and its code touchpoints are understood, run a grilling session 
 
 ## Phase 4 — Implement
 
-0. Switch to the implementation model: if the session isn't already on the tier model recorded in the approved plan, ask the user to switch (e.g. "Plan rated STANDARD — switch with `/model sonnet`, then say continue") and wait. If the user declines or implementation ends up on a different model than the plan recorded, add a one-line note to the work-started ticket comment.
+0. Switch to the implementation model: if the session isn't already on the tier model recorded in the approved plan, ask the user to switch with that model's command from the Model Selection table (e.g. "Plan rated STANDARD — switch with `/model sonnet`, then say continue"; under Pi, `/model claude-bridge/claude-sonnet-5-5`) and wait. If the user declines or implementation ends up on a different model than the plan recorded, add a one-line note to the work-started ticket comment.
 1. Confirm the current branch, and that the default branch is up to date (`git checkout main && git pull`). Never commit to main/master.
 2. Create a branch named `<N>-<short-slug>` (e.g. `42-nrpe-watch-stall-check`).
 3. Implement the approved plan.
