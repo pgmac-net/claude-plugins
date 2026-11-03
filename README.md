@@ -1,6 +1,6 @@
 # claude-plugins
 
-Claude Code plugin marketplace for pgmac-net workflows. These skills also work with [OpenCode](https://opencode.ai).
+Claude Code plugin marketplace for pgmac-net workflows. These skills also work with [OpenCode](https://opencode.ai) and [Pi](https://pi.dev).
 
 ## Install for Claude Code
 
@@ -85,6 +85,39 @@ rm -rf ~/.config/opencode/skills/create-pir \
 
 Fork this repo, add or modify skills under `plugins/<your-plugin>/skills/`, then update `scripts/install-opencode-skills.sh` and `scripts/install-opencode-skills.ps1` with your skill list. Users run the same install flow from your fork.
 
+## Install for Pi
+
+Pi implements the [Agent Skills spec](https://agentskills.io/specification), so the skills load unchanged. Pick one install method — loading both makes Pi warn about duplicate skill names and keep the first copy it finds.
+
+### Package install
+
+```bash
+pi install git:github.com/pgmac-net/claude-plugins
+```
+
+Append `@vX.Y.Z` to pin a release. Update an unpinned install with `pi update git:github.com/pgmac-net/claude-plugins`. The root `package.json` maps every `plugins/*/skills` directory into the package.
+
+### Local clone
+
+For development, point Pi at the clone so edits take effect on `/reload`. Add to `~/.pi/agent/settings.json`:
+
+```json
+{
+  "skills": ["~/pgmac/claude-plugins/plugins/pgmac-workflows/skills"]
+}
+```
+
+### Using the skills in Pi
+
+Skills trigger from their descriptions, or explicitly with `/skill:<name> [args]`:
+
+```
+/skill:pickup-ticket pgmac-net/homelabia#42
+```
+
+- `pickup-ticket` asks you to switch models using [pi-claude-bridge](https://github.com/elidickinson/pi-claude-bridge) IDs such as `/model claude-bridge/claude-sonnet-5-5`. Install the bridge with `pi install npm:pi-claude-bridge`, or decline the switch and the skill carries on with the current model.
+- Steps that use MCP servers need those servers added to Pi with `pi mcp add`: the Notion page in `pickup-ticket` and the Nagios tools in `start-incident`. Pi doesn't support SSE transport, which the Nagios MCP endpoint uses, so `start-incident` falls back to SSH.
+
 ---
 
 ## Plugins
@@ -110,6 +143,8 @@ Fork this repo, add or modify skills under `plugins/<your-plugin>/skills/`, then
 2. Add the plugin entry to `.claude-plugin/marketplace.json`
 3. Bump versions in both files
 4. PR
+
+Pi loads `plugins/<name>/skills/` through the `package.json` glob, so a new plugin's skills need no manifest change. `agents/` and `commands/` are Claude Code only.
 
 ## Development loop
 
