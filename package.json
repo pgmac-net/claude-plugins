@@ -1,0 +1,13 @@
+{
+  "name": "@pgmac-net/claude-plugins",
+  "private": true,
+  "description": "pgmac-net workflow skills, packaged for pi. Claude Code installs them from .claude-plugin/marketplace.json instead.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pgmac-net/claude-plugins.git"
+  },
+  "pi": {
+    "skills": ["./plugins/*/skills"]
+  }
+}
