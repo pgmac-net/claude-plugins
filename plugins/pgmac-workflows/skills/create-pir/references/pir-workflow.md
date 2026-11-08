@@ -45,6 +45,7 @@ The issue body carries stable metadata (detected time, provisional severity, aff
 - Gather any `sargraph` SVGs referenced in timeline comments (usually `~/incident-evidence/incidents-<N>/`).
 - If CPU, memory, disk I/O, load, or network exhaustion is part of any chain and no graphs exist, make them now from the hosts' SAR data (`../../start-incident/references/sar-graphs.md`). Move fast: SAR files rotate, and a PIR written a week later may find the window already gone.
 - If no SAR data covers the window (sysstat disabled, or rotated out), note that in the PIR and raise it as an action item.
+- Gather the nagiosgraph graphs too: timeline comments embed them as signed `statuspage.pgmac.net.au/api/graph` image URLs, with a local PNG under the same evidence directory. For every Nagios check that alerted in a chain and has no graph, make one now (`../../start-incident/references/nagios-graphs.md`). nagiosgraph keeps up to a year of RRD history, so these graphs are still available when the SAR files have rotated out, and they cover hosts with sysstat disabled.
 
 If details are ambiguous or missing from the conversation, make a reasonable inference and note it clearly in the document.
 
@@ -129,6 +130,15 @@ cp ~/incident-evidence/incidents-<N>/k8s03-memory.svg "$IMG/k8s03-memory-exhaust
 ```
 
 Regenerate rather than reuse when the incident-time graph is badly framed. The window should run **baseline → onset → recovery**, with a `--title` a reader understands (commands: `sar-graphs.md`). Always SVG.
+
+**Nagios graphs** are PNG and go in the same directory. Never embed the signed URL in the PIR: it expires (30 days by default), and the PIR is permanent. Download a fresh graph anchored 1–2h after recovery, so the window shows baseline → onset → recovery. Use `day` for incidents under a day and `week` for longer ones:
+
+```bash
+NG=<create-pir-skill-base-dir>/../start-incident/scripts/nagios-graph.sh
+$NG -p day -t '2026-11-08 16:30' -o "$IMG/k8s03-load-average-nagios.png" k8s03 'Load Average'
+```
+
+Exit code `2` means nagiosgraph has no data for that host/service: check the name with `$NG -L <host>`. Read the PNG before you caption it. It has no title of its own, so the alt text and caption must name the host, the Nagios service, and the threshold it crossed.
 
 Embed each graph where it supports the argument: under the Infinite How's level it evidences, or in the Resolution/Recovery section for return-to-baseline graphs. Give it a caption sentence stating what to look at, with AEST times:
 
@@ -234,7 +244,7 @@ git checkout -b docs/pir-<slug>
 git add src/incidents/<filename>.md src/incidents/index.md
 # If runbooks were created or modified:
 git add src/runbooks/<runbook-filename>.md
-# If SAR graphs were embedded:
+# If SAR or Nagios graphs were embedded:
 git add src/incidents/img/<pir-filename-stem>/
 
 # Commit (append the standard Claude Code co-author trailer per the session's commit rules)
@@ -255,13 +265,13 @@ gh pr create \
 - <bullet: key root causes — one per chain>
 - <bullet: action items created as GitHub Issues>
 - <bullet: runbooks created or updated, if any>
-- <bullet: SAR graphs embedded, if any — what each shows>
+- <bullet: SAR / Nagios graphs embedded, if any — what each shows>
 
 ## Test plan
 
 - [ ] Validate workflow passes (MkDocs strict build)
 - [ ] New PIR renders correctly in site
-- [ ] Embedded SAR graphs render (if applicable)
+- [ ] Embedded SAR / Nagios graphs render (if applicable)
 - [ ] Index link resolves to the new document
 - [ ] New/updated runbooks render correctly (if applicable)
 
@@ -311,6 +321,8 @@ Before committing, verify every item:
 - [ ] Executive Summary mentions all three key elements: what happened, why, what fixed it
 - [ ] Lessons Learned has both "What Went Well" and "What Didn't Go Well" sections
 - [ ] If resource exhaustion is in any chain: SAR graphs (SVG) embedded showing onset and recovery, or the missing SAR data recorded as an action item
+- [ ] Each Nagios check that alerted in a root-cause chain has its nagiosgraph PNG embedded (anchored after recovery), or a note saying why not (no perfdata, macro down)
+- [ ] No signed `/api/graph` URLs in the PIR, only committed PNGs
 - [ ] Each embedded graph lives in `src/incidents/img/<pir-filename-stem>/`, is committed, and has a caption stating what it shows with AEST times
 
 **Runbooks (if created or updated):**
