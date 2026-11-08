@@ -31,7 +31,7 @@ The plugin cache path is versioned, so don't hardcode it. It needs `ssh macro`, 
 - `-p` sets the period: `day` (~32h), `week` (~9 days), `month`, `quarter`, or `year`.
 - `-t` sets the window **end** (the anchor). It takes an epoch, anything `date -d` parses (`'2026-11-08 15:30'`, `'2 hours ago'`, in local AEST), or `live`. The default is now.
 - `-o file.png` downloads the graph and validates it. The exit code is `2` when the graph is empty.
-- `-T` sets the signature lifetime in seconds. The default is 30 days.
+- `-T` sets the signature lifetime in seconds, from 60 up to 30 days. The default is the maximum, 30 days.
 
 **Always anchor.** With `-t live` (timet=0) the URL redraws "now" on every fetch, so a timeline comment read next week would show next week's graph. The default anchor (now) freezes the window to what the responder saw.
 

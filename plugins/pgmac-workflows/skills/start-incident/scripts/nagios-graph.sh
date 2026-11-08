@@ -20,7 +20,7 @@
 #              ("2026-11-08 15:30", "2 hours ago"), or "live". Default: now.
 #              "live" (timet=0) drifts with every fetch — never use it in a
 #              record that someone reads later.
-#   -T ttl     signature lifetime in seconds (default: 2592000 = 30 days)
+#   -T ttl     signature lifetime in seconds, 60..2592000 (default: 30 days)
 #   -o file    also download the PNG to file and validate it
 #
 # Prints the signed URL on stdout.
@@ -73,7 +73,14 @@ while getopts ":p:t:T:o:L:h" opt; do
 done
 shift $((OPTIND - 1))
 
+is_uint() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
+
 if [ -n "${LIST}" ]; then
+    # The host is interpolated into a remote shell command; allow only
+    # hostname characters so a quote can't break out of it.
+    case "${LIST}" in
+        *[!A-Za-z0-9._-]*) echo "ERROR: invalid host name '${LIST}'" >&2; exit 1 ;;
+    esac
     list_services "${LIST}"
     exit 0
 fi
@@ -87,6 +94,12 @@ case "${PERIOD}" in
     *) echo "ERROR: period must be day|week|month|quarter|year" >&2; exit 1 ;;
 esac
 
+# TTL feeds $(( )), where bash evaluates expressions such as a[$(cmd)].
+# Accept digits only, and cap it.
+if ! is_uint "${TTL}" || [ "${TTL}" -lt 60 ] || [ "${TTL}" -gt 2592000 ]; then
+    echo "ERROR: ttl must be an integer from 60 to 2592000 seconds" >&2; exit 1
+fi
+
 NOW=$(date +%s)
 case "${WHEN}" in
     live) TIMET=0 ;;
@@ -94,6 +107,7 @@ case "${WHEN}" in
     *[!0-9]*) TIMET=$(date -d "${WHEN}" +%s) || { echo "ERROR: cannot parse -t '${WHEN}'" >&2; exit 1; } ;;
     *) TIMET="${WHEN}" ;;
 esac
+is_uint "${TIMET}" || { echo "ERROR: cannot parse -t '${WHEN}'" >&2; exit 1; }
 # The proxy forwards offset = now - timet; a future anchor would be clamped to
 # live anyway, so pin it to now and keep the record stable.
 [ "${TIMET}" -le "${NOW}" ] || TIMET="${NOW}"
@@ -109,8 +123,12 @@ fi
     || { echo "ERROR: GRAPH_SIGNING_SECRET / STATUSPAGE_BASE_URL not found" >&2; exit 1; }
 
 EXPIRES=$(( NOW + TTL ))
+# HMAC in python with the key passed through the environment: on the
+# openssl command line (-hmac KEY) it would be visible to other local users
+# in ps. The payload goes in on stdin.
 SIG=$(printf '%s' "${HOST}|${SERVICE}|${PERIOD}|${TIMET}|${EXPIRES}" \
-    | openssl dgst -sha256 -hmac "${GRAPH_SIGNING_SECRET}" | awk '{print $NF}')
+    | NG_KEY="${GRAPH_SIGNING_SECRET}" python3 -I -c \
+        'import hashlib,hmac,os,sys; print(hmac.new(os.environ["NG_KEY"].encode(), sys.stdin.buffer.read(), hashlib.sha256).hexdigest())')
 HOST_ENC=$(jq -rn --arg s "${HOST}" '$s|@uri')
 SERVICE_ENC=$(jq -rn --arg s "${SERVICE}" '$s|@uri')
 URL="${STATUSPAGE_BASE_URL%/}/api/graph?host=${HOST_ENC}&service=${SERVICE_ENC}&period=${PERIOD}&timet=${TIMET}&expires=${EXPIRES}&sig=${SIG}"
