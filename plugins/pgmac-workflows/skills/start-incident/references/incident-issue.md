@@ -76,7 +76,7 @@ Append-only, one comment per milestone, each timestamped AEST:
 **HH:MM AEST** — <what happened, what was run, what it showed>
 ```
 
-Post one at each of: first symptom confirmed, monitoring source consulted and what it showed, runbook matched (or gap noted), each diagnostic step with its result (including what any SAR graph showed, with its local SVG path), each mutation *and its observed effect*, recovery confirmed. This is deliberately the same granularity `create-pir` Step 1 needs to extract timeline events — matching it here means Step 1 becomes "read the issue," not "reconstruct from memory."
+Post one at each of: first symptom confirmed, monitoring source consulted and what it showed, runbook matched (or gap noted), each diagnostic step with its result (including what any SAR or Nagios graph showed, with its local file path; a Nagios graph also embeds its signed URL as an image, per `nagios-graphs.md` §4), each mutation *and its observed effect*, recovery confirmed. This is deliberately the same granularity `create-pir` Step 1 needs to extract timeline events — matching it here means Step 1 becomes "read the issue," not "reconstruct from memory."
 
 ```bash
 gh issue comment <N> --repo pgmac-net/incidents --body "**14:32 AEST** — ..."

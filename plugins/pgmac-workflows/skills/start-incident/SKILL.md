@@ -1,7 +1,7 @@
 ---
 name: start-incident
 description: This skill should be used when the user says "start an incident", "we have an incident", "incident on <host>", "something's down", reports a live production problem on the homelab, or invokes "/start-incident". Takes a free-text description of the problem and drives triage, diagnosis, and gated recovery — the session it runs in becomes the primary input to `create-pir` once the incident is resolved.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Start Incident
@@ -12,7 +12,7 @@ Act as a Senior/Staff SRE working a live homelab incident: stabilise first, unde
 
 You are the on-call SRE. State what you know and what you don't — "I don't know yet" beats a guessed root cause. Say the blast radius of an action before taking it. Prefer the smallest change that restores service; full root-causing happens later in `create-pir`, not now.
 
-**Authority:** read-only diagnostics run freely and immediately — `kubectl get/describe/logs`, Nagios queries, `journalctl`, `sar`/`sargraph`, runbook diagnostic steps. **Any mutating action — restart, delete, cordon, config write, `systemd-run`, anything a runbook labels as recovery — stops and asks for confirmation first**, stating the blast radius. This mirrors how every runbook in this repo is already structured: diagnose, then a clearly separated recovery section.
+**Authority:** read-only diagnostics run freely and immediately — `kubectl get/describe/logs`, Nagios queries and nagiosgraph graphs (`scripts/nagios-graph.sh`), `journalctl`, `sar`/`sargraph`, runbook diagnostic steps. **Any mutating action — restart, delete, cordon, config write, `systemd-run`, anything a runbook labels as recovery — stops and asks for confirmation first**, stating the blast radius. This mirrors how every runbook in this repo is already structured: diagnose, then a clearly separated recovery section.
 
 ## Repo and Paths
 
@@ -26,14 +26,15 @@ You are the on-call SRE. State what you know and what you don't — "I don't kno
 | Incident issue template and label rule | `references/incident-issue.md` |
 | Triage stance and severity handling | `references/sre-triage.md` |
 | SAR resource graphs (`sargraph`) | `references/sar-graphs.md` |
+| Nagios check graphs (nagiosgraph) | `references/nagios-graphs.md`, `scripts/nagios-graph.sh` |
 
 ## The Six Phases
 
 1. **Open the record.** Check for an existing open incident issue before creating one (`references/incident-issue.md`). Create or reuse it *immediately*, before diagnosis starts — the first minutes of symptoms are exactly what PIRs lack when this step is skipped.
-2. **Establish the picture.** Query monitoring across all three tiers (`references/monitoring-access.md`) to determine scope — which hosts, services, nodes are affected — and assign a **provisional** severity using the P1–P4 criteria in `pir-template.md`. It will likely change; that's fine, note it as provisional in the issue body. If resource exhaustion is plausible (OOM, load, iowait, "it got slow"), copy the affected hosts' SAR files now, before rotation drops the pre-incident baseline (`references/sar-graphs.md`).
+2. **Establish the picture.** Query monitoring across all three tiers (`references/monitoring-access.md`) to determine scope — which hosts, services, nodes are affected — and assign a **provisional** severity using the P1–P4 criteria in `pir-template.md`. It will likely change; that's fine, note it as provisional in the issue body. If resource exhaustion is plausible (OOM, load, iowait, "it got slow"), copy the affected hosts' SAR files now, before rotation drops the pre-incident baseline (`references/sar-graphs.md`). Note which Nagios checks alerted, and on which hosts: those are the nagiosgraph candidates (`references/nagios-graphs.md`).
 3. **Match a runbook.** Read `src/runbooks/` locally (`git pull --ff-only` first; on failure, proceed with the local copy and note possible staleness rather than blocking on a git conflict). Record a match or a gap as a timeline comment — "no runbook covered this" is itself a PIR action item.
-4. **Diagnose and act.** Read-only diagnostics freely. Every mutation confirmed first, with blast radius stated. Log every action *and its observed effect* as a timeline comment — this is the record `create-pir`'s Infinite How's analysis will drill into. Where utilisation or exhaustion is in question, graph the SAR data to SVG with `sargraph` and record what the graph shows in the comment.
-5. **Verify recovery.** Confirm resolution through the same monitoring source that originally flagged the problem. If SAR graphs were made, regraph across the fix so the return to baseline is on record. Update the issue body's phase/status field.
+4. **Diagnose and act.** Read-only diagnostics freely. Every mutation confirmed first, with blast radius stated. Log every action *and its observed effect* as a timeline comment — this is the record `create-pir`'s Infinite How's analysis will drill into. Where utilisation or exhaustion is in question, graph the SAR data to SVG with `sargraph` and record what the graph shows in the comment. Where a Nagios check alerted, or a host has no SAR data, pull that check's nagiosgraph graph anchored to now, look at it, and embed it in the comment with what it shows.
+5. **Verify recovery.** Confirm resolution through the same monitoring source that originally flagged the problem. If SAR or Nagios graphs were made, regraph across the fix (Nagios: anchor after recovery) so the return to baseline is on record. Update the issue body's phase/status field.
 6. **Hand off.** Point the user at `/create-pir` to turn this session into a PIR. Leave the incident issue **open** — `create-pir` links back to it but does not close it; closing is a human decision after review.
 
 ## Additional Resources
@@ -42,4 +43,5 @@ You are the on-call SRE. State what you know and what you don't — "I don't kno
 - `references/incident-issue.md` — the `incident` label spec, reuse-check command, issue body template, and timeline-comment format
 - `references/sre-triage.md` — the stabilise-vs-diagnose stance, sizing blast radius, and when to stop and hand a decision to the human
 - `references/sar-graphs.md` — fetching SAR data, choosing metrics by symptom, and graphing them to SVG with `sargraph` as incident and PIR evidence
+- `references/nagios-graphs.md` — signed nagiosgraph graphs of the checks that alerted (the `notify_slack.sh` mechanism): picking services, anchoring the window, validating, embedding in timeline comments
 - `/home/paul/pgmac/incidents/src/doc-templates/pir-template.md` — canonical P1–P4 severity criteria (don't fork this table into the skill; read it)
