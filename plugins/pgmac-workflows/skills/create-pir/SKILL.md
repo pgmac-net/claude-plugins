@@ -1,7 +1,7 @@
 ---
 name: create-pir
 description: This skill should be used when the user says "create a PIR", "write a post-incident review", "generate an incident report", "document this incident", "write a post-mortem", "capture this incident", or asks to create formal incident documentation from the current session. Trigger whenever an incident has been resolved and the user wants structured documentation.
-version: 1.6.0
+version: 1.7.0
 ---
 
 # Create Post-Incident Review (PIR)
@@ -20,14 +20,15 @@ If the incident was worked with `start-incident`, an incident tracking issue in 
 | Index page | `src/incidents/index.md` |
 | PIR template | `src/doc-templates/pir-template.md` |
 | Runbook template | `src/doc-templates/runbook-template.md` |
+| PIR graphs (SVG) | `src/incidents/img/<pir-filename-stem>/` |
 | Document format | MkDocs markdown with YAML frontmatter tags |
 
 ## The Ten Steps
 
-1. **Extract** incident metadata, timeline, root-cause chains, and action items — from the incident tracking issue if one exists (primary source), the conversation otherwise.
+1. **Extract** incident metadata, timeline, root-cause chains, and action items — from the incident tracking issue if one exists (primary source), the conversation otherwise. Collect any `sargraph` SVGs made during the incident; if resource utilisation or exhaustion played a part and none exist, make them now.
 2. **Root-cause** each chain with Infinite How's (methodology: `references/infinite-hows.md`).
 3. **Name** the document — filename and title conventions.
-4. **Write** the PIR against the template, with MkDocs frontmatter — `title`, `date`, `severity` (`P1`–`P4`), `duration`, `resolution`, `impact`, `tags`.
+4. **Write** the PIR against the template, with MkDocs frontmatter — `title`, `date`, `severity` (`P1`–`P4`), `duration`, `resolution`, `impact`, `tags`. Embed SAR graphs (SVG) where they show root cause or recovery.
 5. **Runbooks** — decide create / extend / skip per failure chain, using the runbook template.
 6. **Issues** — one GitHub Issue per action item, labelled `incident` (repo selection and format: `references/github-issues-setup.md`).
 7. **Back-fill** the `ISSUE-XXX` placeholders in the PIR with real issue links.
@@ -41,6 +42,7 @@ Full detail, exact commands, and the closing quality checklist for every step: `
 
 - `references/pir-workflow.md` — the full step-by-step procedure and quality checklist
 - `references/infinite-hows.md` — root cause drilling methodology
+- `../start-incident/references/sar-graphs.md` — `sargraph` usage: fetching SAR data, metrics by symptom, graphing to SVG
 - `references/github-issues-setup.md` — GitHub Issues field reference and repo-selection rules
 - `/home/paul/pgmac/incidents/src/doc-templates/pir-template.md` — PIR template with section guidance (also published at the incidents site under Templates → PIR Structure Template)
 - `/home/paul/pgmac/incidents/src/doc-templates/runbook-template.md` — runbook template, simple and multi-mode patterns
