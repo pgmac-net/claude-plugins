@@ -41,6 +41,11 @@ The issue body carries stable metadata (detected time, provisional severity, aff
 - Missing runbooks or documented procedures
 - Longer-term architectural improvements
 
+**Resource graphs:**
+- Gather any `sargraph` SVGs referenced in timeline comments (usually `~/incident-evidence/incidents-<N>/`).
+- If CPU, memory, disk I/O, load, or network exhaustion is part of any chain and no graphs exist, make them now from the hosts' SAR data (`../../start-incident/references/sar-graphs.md`). Move fast: SAR files rotate, and a PIR written a week later may find the window already gone.
+- If no SAR data covers the window (sysstat disabled, or rotated out), note that in the PIR and raise it as an action item.
+
 If details are ambiguous or missing from the conversation, make a reasonable inference and note it clearly in the document.
 
 ## Step 2 — Apply Infinite How's Root Cause Analysis
@@ -110,6 +115,30 @@ Read the template and section guidance at `/home/paul/pgmac/incidents/src/doc-te
 - Domain: `networking`, `storage`, `scheduling`
 
 Leave Action Items table issue links as `ISSUE-XXX` placeholders — fill in after creating issues in Step 6.
+
+### Resource graphs
+
+A graph is worth embedding when it shows something a sentence can't prove on its own: the resource hitting its ceiling as symptoms began (root cause), or returning to baseline after the fix (recovery). Skip graphs that are flat or unrelated to any chain. Two or three well-chosen graphs beat a wall of panels.
+
+Copy the SVGs into the incidents repo next to the PIR, named for what they show:
+
+```bash
+IMG=/home/paul/pgmac/incidents/src/incidents/img/<pir-filename-stem>
+mkdir -p "$IMG"
+cp ~/incident-evidence/incidents-<N>/k8s03-memory.svg "$IMG/k8s03-memory-exhaustion.svg"
+```
+
+Regenerate rather than reuse when the incident-time graph is badly framed. The window should run **baseline → onset → recovery**, with a `--title` a reader understands (commands: `sar-graphs.md`). Always SVG.
+
+Embed each graph where it supports the argument: under the Infinite How's level it evidences, or in the Resolution/Recovery section for return-to-baseline graphs. Give it a caption sentence stating what to look at, with AEST times:
+
+```markdown
+![k8s03 memory: %memused 62→97% from 13:50 AEST, swap-in from 14:05, OOM kills at 14:20](img/2026-11-08-k8s03-oom-cascade/k8s03-memory-exhaustion.svg)
+
+*%memused climbs steadily from 13:50 AEST; major faults spike at 14:20 as the OOM killer fires. Recovery at 15:05 after the leaking pod was restarted.*
+```
+
+The alt text carries the finding too, not just "graph". `mise run build-strict` fails on a broken image path, so a wrong relative link is caught in Step 9.
 
 ## Step 5 — Evaluate and Create Runbooks
 
@@ -205,6 +234,8 @@ git checkout -b docs/pir-<slug>
 git add src/incidents/<filename>.md src/incidents/index.md
 # If runbooks were created or modified:
 git add src/runbooks/<runbook-filename>.md
+# If SAR graphs were embedded:
+git add src/incidents/img/<pir-filename-stem>/
 
 # Commit (append the standard Claude Code co-author trailer per the session's commit rules)
 git commit -m "docs(pir): <incident title> (<primary-issue-ref>)
@@ -224,11 +255,13 @@ gh pr create \
 - <bullet: key root causes — one per chain>
 - <bullet: action items created as GitHub Issues>
 - <bullet: runbooks created or updated, if any>
+- <bullet: SAR graphs embedded, if any — what each shows>
 
 ## Test plan
 
 - [ ] Validate workflow passes (MkDocs strict build)
 - [ ] New PIR renders correctly in site
+- [ ] Embedded SAR graphs render (if applicable)
 - [ ] Index link resolves to the new document
 - [ ] New/updated runbooks render correctly (if applicable)
 
@@ -277,6 +310,8 @@ Before committing, verify every item:
 - [ ] Index row: correct date, badge severity matches frontmatter `severity`, title links to correct filename, duration matches metadata
 - [ ] Executive Summary mentions all three key elements: what happened, why, what fixed it
 - [ ] Lessons Learned has both "What Went Well" and "What Didn't Go Well" sections
+- [ ] If resource exhaustion is in any chain: SAR graphs (SVG) embedded showing onset and recovery, or the missing SAR data recorded as an action item
+- [ ] Each embedded graph lives in `src/incidents/img/<pir-filename-stem>/`, is committed, and has a caption stating what it shows with AEST times
 
 **Runbooks (if created or updated):**
 - [ ] Runbook decision was made explicitly — either a runbook was created, an existing one was updated, or skipped with a clear reason
