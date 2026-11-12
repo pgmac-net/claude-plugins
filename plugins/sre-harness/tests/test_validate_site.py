@@ -52,6 +52,27 @@ def test_secret_shaped_values_are_rejected_without_echo(edit_site, value):
     assert all(value not in err for err in found)
 
 
+TOKEN = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: doc["monitoring"][0].update({"credentials_env": [TOKEN]}),
+        lambda doc: doc.update({"chat": {"token": TOKEN}}),
+        lambda doc: doc["monitoring"][0].update({"type": TOKEN}),
+        lambda doc: doc["site"].update({"name": TOKEN}),
+        lambda doc: doc.update({"schema_version": TOKEN}),
+        lambda doc: doc["repos"]["incidents"].update({"fallback_url": TOKEN}),
+    ],
+)
+def test_schema_errors_never_echo_values(edit_site, mutate):
+    report = vs.validate(edit_site(mutate))
+    assert report.errors
+    assert all(TOKEN not in err for err in report.errors)
+    assert TOKEN not in str(report.as_dict())
+
+
 def test_env_var_names_are_not_secrets():
     assert vs.find_secrets({"credentials_env": ["GRAFANA_TOKEN", "NAGIOS_PASSWORD"]}) == []
 

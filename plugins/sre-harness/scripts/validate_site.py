@@ -132,14 +132,44 @@ def load_yaml(path: Path) -> Any:
         raise SiteError(f"{path}: not valid YAML: {exc}") from exc
 
 
+# Validators whose jsonschema message names keys only, never values.
+_KEY_ONLY_VALIDATORS = {"additionalProperties", "required"}
+_SAFE_TEMPLATES = {
+    "const": "must be {limit!r}",
+    "enum": "must be one of {limit}",
+    "pattern": "does not match the pattern {limit}",
+    "type": "must be of type {limit}",
+    "format": "is not a valid {limit}",
+    "maxProperties": "must have at most {limit} properties",
+    "minItems": "must have at least {limit} item(s)",
+    "minLength": "must be at least {limit} character(s) long",
+    "minimum": "must be at least {limit}",
+    "uniqueItems": "must not contain duplicates",
+}
+
+
+def _safe_message(err: Any) -> str:
+    """Describe a schema violation without echoing the offending value.
+
+    jsonschema's own messages quote the instance, which would print a secret
+    that was put in the wrong field.
+    """
+    if err.validator in _KEY_ONLY_VALIDATORS:
+        return err.message
+    template = _SAFE_TEMPLATES.get(err.validator)
+    if template is None:
+        return f"failed the '{err.validator}' check"
+    return template.format(limit=err.validator_value)
+
+
 def schema_errors(doc: Any, schema_name: str) -> list[str]:
-    """Return human-readable schema violations for a document."""
+    """Return human-readable schema violations for a document. Values are never echoed."""
     schema = json.loads((SCHEMA_DIR / schema_name).read_text(encoding="utf-8"))
     validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
     found = []
     for err in sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path)):
         where = "/".join(str(part) for part in err.absolute_path) or "(root)"
-        found.append(f"{where}: {err.message}")
+        found.append(f"{where}: {_safe_message(err)}")
     return found
 
 

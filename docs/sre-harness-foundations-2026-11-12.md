@@ -51,7 +51,7 @@ every later SRE harness milestone builds on:
 
 ## Verification
 
-- 38 tests pass; ruff and pylint (10.00/10) are clean.
+- 44 tests pass; ruff and pylint (10.00/10) are clean.
 - The validator accepts the template and rejects an unknown key, a
   secret-shaped value, a public audit location, an unknown repo alias and
   duplicate tier IDs.
