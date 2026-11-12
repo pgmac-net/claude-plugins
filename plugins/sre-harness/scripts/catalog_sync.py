@@ -261,7 +261,7 @@ _DEFINE = re.compile(r"define\s+(\w+)\s*\{(.*?)\}", re.DOTALL)
 
 
 def read_nagios_objects(path: Path) -> dict[str, list[dict[str, str]]]:
-    """Parse Nagios object files into {object type: [directives]}. Templates are dropped."""
+    """Parse Nagios object files into {object type: [directives]}. Templates (register 0) are included."""
     files = [path] if path.is_file() else sorted(path.rglob("*.cfg"))
     objects: dict[str, list[dict[str, str]]] = {}
     for cfg in files:
@@ -276,13 +276,42 @@ def read_nagios_objects(path: Path) -> dict[str, list[dict[str, str]]]:
                 parts = line.split(None, 1)
                 if parts:
                     directives[parts[0]] = parts[1].strip() if len(parts) > 1 else ""
-            if directives.get("register") != "0":
-                objects.setdefault(kind, []).append(directives)
+            objects.setdefault(kind, []).append(directives)
     return objects
 
 
 def _csv(value: str | None) -> list[str]:
     return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
+_INHERITED = ("hostgroups", "parents", "alias", "address", "notes_url")
+
+
+def _inherit(
+    host: dict[str, str], templates: dict[str, dict[str, str]], seen: frozenset[str] = frozenset()
+) -> dict[str, str]:
+    """Apply Nagios template inheritance for the directives the catalog uses.
+
+    The object's own value wins. A value starting with '+' is added to what the
+    templates give. Templates defined outside the source path are unknown here
+    and contribute nothing.
+    """
+    inherited: dict[str, str] = {}
+    for template_name in _csv(host.get("use")):
+        template = templates.get(template_name)
+        if template is None or template_name in seen:
+            continue
+        for key, value in _inherit(template, templates, seen | {template_name}).items():
+            inherited.setdefault(key, value)
+    resolved = dict(host)
+    for key in _INHERITED:
+        own = host.get(key)
+        if own is None:
+            if key in inherited:
+                resolved[key] = inherited[key]
+        elif own.startswith("+"):
+            resolved[key] = ",".join(filter(None, [own[1:].strip(), inherited.get(key, "")]))
+    return resolved
 
 
 def _host_groups(hosts: dict[str, dict[str, str]], hostgroups: list[dict[str, str]]) -> dict[str, set[str]]:
@@ -329,13 +358,16 @@ def nagios_hosts(path: Path, skip_hosts: set[str]) -> dict[str, dict[str, Any]]:
     check_command is deliberately not recorded: it can carry credentials.
     """
     objects = read_nagios_objects(path)
+    templates = {h["name"]: h for h in objects.get("host", []) if h.get("name")}
     hosts = {
-        h["host_name"]: h for h in objects.get("host", []) if h.get("host_name") and h["host_name"] not in skip_hosts
+        h["host_name"]: _inherit(h, templates)
+        for h in objects.get("host", [])
+        if h.get("host_name") and h.get("register") != "0" and h["host_name"] not in skip_hosts
     }
     groups = _host_groups(hosts, objects.get("hostgroup", []))
     checks: dict[str, set[str]] = {name: set() for name in hosts}
     for service in objects.get("service", []):
-        if service.get("service_description"):
+        if service.get("service_description") and service.get("register") != "0":
             for name in _service_hosts(service, groups):
                 checks[name].add(service["service_description"])
 
@@ -350,6 +382,31 @@ def nagios_hosts(path: Path, skip_hosts: set[str]) -> dict[str, dict[str, Any]]:
     return resolved
 
 
+def _match_name(entity: dict[str, Any]) -> str:
+    """The name a monitored host must carry to belong to this Resource."""
+    sre = entity["spec"].get("sre", {})
+    return str(sre.get("application") or sre.get("inventory_name") or "").lower()
+
+
+def _claims(monitored: dict[str, Any], by_key: dict[str, dict[str, Any]]) -> set[str]:
+    """Which monitored host claims each existing Resource.
+
+    Several monitored hosts can share a short name (a host and a web front end
+    on it, say). Only one may claim the Resource: an exact name match wins, then
+    the shortest name. The others get a Resource of their own.
+    """
+    candidates: dict[str, list[str]] = {}
+    for name in monitored:
+        if short_host(name) in by_key:
+            candidates.setdefault(short_host(name), []).append(name)
+
+    def best(key: str) -> str:
+        exact = _match_name(by_key[key])
+        return min(candidates[key], key=lambda n: (n.lower() != exact, len(n), n))
+
+    return {best(key) for key in candidates}
+
+
 def merge_nagios(
     source: dict[str, Any], path: Path, owner: str, existing: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -358,15 +415,16 @@ def merge_nagios(
     monitored = nagios_hosts(path, skip)
     by_key: dict[str, dict[str, Any]] = {}
     for entity in existing:
-        sre = entity["spec"].get("sre", {})
-        key = sre.get("application") or short_host(sre.get("inventory_name", ""))
+        key = short_host(_match_name(entity))
         if key:
-            by_key.setdefault(str(key).lower(), entity)
+            by_key.setdefault(key, entity)
+
+    winners = _claims(monitored, by_key)
 
     owner_of: dict[str, dict[str, Any]] = {}
     created = []
     for name in sorted(monitored):
-        target = by_key.get(short_host(name))
+        target = by_key[short_host(name)] if name in winners else None
         if target is None:
             target = {
                 "apiVersion": API_VERSION,

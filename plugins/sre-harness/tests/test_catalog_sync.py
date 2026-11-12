@@ -47,6 +47,20 @@ define host {
 }
 define host {
     name        linux-server
+    hostgroups  linux
+    notes_url   https://docs.example.com/hosts
+    register    0
+}
+define host {
+    host_name   web01.shop.example.com
+    address     192.0.2.80
+    use         frontend
+    parents     web01
+}
+define host {
+    name        frontend
+    use         linux-server
+    hostgroups  +frontends
     register    0
 }
 define hostgroup {
@@ -174,12 +188,13 @@ def test_build_produces_expected_entities(estate):
         "apps/app-shop.yaml",
         "apps/cluster-main.yaml",
         "checks/monitored-edge.yaml",
+        "checks/monitored-web01-shop-example-com.yaml",
         "hosts/host-db01.yaml",
         "hosts/host-web01.yaml",
         "hosts/host-web02.yaml",
         "sources.yaml",
     ]
-    assert build.counts == {"apps": 3, "checks": 1, "hosts": 3}
+    assert build.counts == {"apps": 3, "checks": 2, "hosts": 3}
 
 
 def test_no_variable_or_check_command_reaches_the_catalog(estate):
@@ -201,8 +216,28 @@ def test_nagios_facts_merge_onto_the_matching_host(estate):
     assert monitoring["host"] == "web01"
     assert monitoring["hostgroups"] == ["all-servers", "web-servers"]
     assert monitoring["checks"] == ["Disk", "HTTP", "Ping"]
+    assert monitoring["notes_url"] == "https://docs.example.com/hosts"
     assert web01["spec"]["dependsOn"] == ["resource:monitored-edge"]
     assert web01["spec"]["sre"]["groups"] == ["servers", "web"]
+
+
+def test_exact_name_claims_the_host_and_the_other_gets_its_own_resource(estate):
+    """A second monitored host sharing the short name must not overwrite the first."""
+    site, doc = estate
+    build = cs.build(site, doc)
+    assert entity(build, "hosts/host-web01.yaml")["spec"]["sre"]["monitoring"]["host"] == "web01"
+    front = entity(build, "checks/monitored-web01-shop-example-com.yaml")
+    assert front["spec"]["type"] == "monitored-host"
+    assert front["spec"]["dependsOn"] == ["resource:host-web01"]
+    assert front["spec"]["sre"]["monitoring"]["hostgroups"] == ["frontends", "linux"]
+    assert front["spec"]["sre"]["monitoring"]["checks"] == ["Ping"]
+
+
+def test_templates_are_not_hosts_and_inheritance_applies(estate):
+    site, doc = estate
+    build = cs.build(site, doc)
+    assert not any("linux-server" in rel or "frontend" in rel for rel in build.files)
+    assert "linux" not in entity(build, "hosts/host-web01.yaml")["spec"]["sre"]["monitoring"]["hostgroups"]
 
 
 def test_exclusion_and_wildcard_in_service_host_name(estate):

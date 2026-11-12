@@ -57,7 +57,7 @@ repositories.
 
 ## Verification
 
-- 75 tests pass; ruff clean; pylint 10.00/10.
+- 78 tests pass; ruff clean; pylint 10.00/10.
 - Run twice against real sources: second run changes nothing.
 - Identifier scan clean, generic and against a private denylist.
 

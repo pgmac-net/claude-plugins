@@ -128,7 +128,9 @@ def _has_monitoring(entity: Entity, by_ref: dict[str, Entity]) -> bool:
         return True
     for ref in entity.spec.get("dependsOn", []):
         target = by_ref.get(ref)
-        if target and (target.spec.get("sre") or {}).get("monitoring", {}).get("checks"):
+        monitoring = (target.spec.get("sre") or {}).get("monitoring", {}) if target else {}
+        # A monitored host always has a host check, even with no service checks.
+        if monitoring.get("checks") or monitoring.get("host"):
             return True
     return False
 

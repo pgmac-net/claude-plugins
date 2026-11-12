@@ -217,6 +217,14 @@ def test_monitoring_can_be_derived_or_explicit(site):
     assert site.check().errors == []
 
 
+def test_host_check_alone_counts_as_monitoring(site):
+    doc = resource("host-web01", checks=[])
+    doc["spec"]["sre"]["monitoring"]["host"] = "web01"
+    site.write("generated/hosts/host-web01.yaml", doc)
+    site.write("services/shop.yaml", complete_service())
+    assert site.check().errors == []
+
+
 def test_drafted_facts_warn_until_confirmed(site):
     site.write("generated/hosts/host-web01.yaml", resource("host-web01", checks=["Disk"]))
     site.write("services/shop.yaml", complete_service(unverified=["dependencies", "purpose"]))
