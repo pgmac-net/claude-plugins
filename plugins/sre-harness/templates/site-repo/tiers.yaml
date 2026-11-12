@@ -7,11 +7,13 @@ tiers:
     name: critical
     description: Other services or people depend on it. An outage is an incident.
     requires: [catalog_entry, journeys, slis, slo, error_budget_policy, sla_report]
+    catalog_requires: [dependencies, pattern, monitoring, runbooks]
     status_update_minutes: 30
   - id: 2
     name: standard
     description: Useful, with a few users. An outage is inconvenient.
     requires: [catalog_entry, slo]
+    catalog_requires: [pattern]
     status_update_minutes: 60
   - id: 3
     name: best-effort

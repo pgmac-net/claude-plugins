@@ -1,7 +1,7 @@
 ---
 name: site-check
 description: This skill should be used when the user says "check the site config", "validate site.yaml", "is the SRE harness set up", "site-check", or when another sre-harness skill fails to load its site. Finds the site repository, validates its configuration and reports what is configured and what is missing.
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Site Check
@@ -26,7 +26,9 @@ Find the site repository, validate it, and report its state. Read-only: this ski
    | 1 | Invalid | Report each error with the fix; change nothing |
    | 2 | No site resolved | Explain the three ways to point at a site (`references/site-config.md`) |
 
-3. **Report.** Lead with valid or invalid. Then: site name, repositories and their visibility, monitoring sources, tier names, catalog entity count, audit location. List `chat` and `slo` as "not configured yet" when empty; that is expected until their milestones ship.
+3. **Report.** Lead with valid or invalid. Then: site name, repositories and their visibility, monitoring sources, tier names, audit location, and the catalog: sources, services by tier, generated Resources, uncatalogued count, unverified services. Catalog findings are prefixed `catalog:`; for anything beyond reporting them, use the `catalog-sync` skill. List `chat` and `slo` as "not configured yet" when empty; that is expected until their milestones ship.
+
+4. **Check staleness** when the site has catalog sources: `uv run <plugin root>/scripts/catalog_sync.py --check`. Exit 1 means the generated layer is behind its sources; say so and point at `catalog-sync`. Skip this step if a source checkout is missing.
 
 ## Gotchas
 

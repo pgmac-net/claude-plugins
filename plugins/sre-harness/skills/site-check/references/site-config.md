@@ -31,11 +31,12 @@ The output gives `site_root`. After a valid result, read `<site_root>/site.yaml`
 | `tracker` | Repository alias and label for incident issues |
 | `monitoring` | Sources the agent may query: type, endpoint, MCP server name, names of credential environment variables |
 | `tiers_file` | Service tier definitions |
-| `catalog_path` | Catalog entity directory |
+| `catalog` | Catalog directory, default owner, runbooks repository, and the sources the generated layer is built from |
+| `patterns_path` | Deployment pattern pages |
 | `audit` | Repository alias and directory for audit logs. Must be private |
-| `chat`, `slo` | Reserved; empty in schema version 1 |
+| `chat`, `slo` | Reserved; must be empty |
 
-Schemas: `<plugin root>/schemas/site.schema.json`, `tiers.schema.json`. Unknown keys are errors.
+Schemas: `<plugin root>/schemas/site.schema.json` (version 2), `tiers.schema.json`, `entity.schema.json`. Unknown keys are errors.
 
 ## Rules
 

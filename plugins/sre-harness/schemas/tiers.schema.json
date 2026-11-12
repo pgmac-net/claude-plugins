@@ -5,7 +5,10 @@
   "description": "Defines the service tiers of a site and what each tier requires. Services are assigned to tiers in their catalog entries, not here.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "tiers"],
+  "required": [
+    "schema_version",
+    "tiers"
+  ],
   "properties": {
     "schema_version": {
       "const": 1
@@ -16,7 +19,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "name", "description", "requires"],
+        "required": [
+          "id",
+          "name",
+          "description",
+          "requires"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -34,13 +42,33 @@
             "type": "array",
             "uniqueItems": true,
             "items": {
-              "enum": ["catalog_entry", "journeys", "slis", "slo", "error_budget_policy", "sla_report"]
+              "enum": [
+                "catalog_entry",
+                "journeys",
+                "slis",
+                "slo",
+                "error_budget_policy",
+                "sla_report"
+              ]
             }
           },
           "status_update_minutes": {
             "type": "integer",
             "minimum": 1,
             "description": "Default interval between incident status updates for services in this tier."
+          },
+          "catalog_requires": {
+            "type": "array",
+            "uniqueItems": true,
+            "description": "What a service's catalog entry must state at this tier. A missing item is an error unless the entry lists it under 'unverified'.",
+            "items": {
+              "enum": [
+                "dependencies",
+                "pattern",
+                "monitoring",
+                "runbooks"
+              ]
+            }
           }
         }
       }

@@ -5,15 +5,26 @@
   "description": "site.yaml at the root of a site repository. Holds site facts only. Secrets are never stored here: reference them by environment variable name.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "site", "repos", "tracker", "monitoring", "tiers_file", "catalog_path", "audit"],
+  "required": [
+    "schema_version",
+    "site",
+    "repos",
+    "tracker",
+    "monitoring",
+    "tiers_file",
+    "catalog",
+    "audit"
+  ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "site": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
         "name": {
           "type": "string",
@@ -28,7 +39,9 @@
     "repos": {
       "type": "object",
       "description": "Repositories the harness reads or writes. The key is a local alias. 'catalog' is the site repository itself.",
-      "required": ["catalog"],
+      "required": [
+        "catalog"
+      ],
       "additionalProperties": {
         "$ref": "#/$defs/repo"
       }
@@ -37,7 +50,10 @@
       "type": "object",
       "description": "Where incident tracking issues are opened.",
       "additionalProperties": false,
-      "required": ["repo", "incident_label"],
+      "required": [
+        "repo",
+        "incident_label"
+      ],
       "properties": {
         "repo": {
           "$ref": "#/$defs/repoAlias"
@@ -59,15 +75,14 @@
       "type": "string",
       "description": "Path to the service tier definitions, relative to the site root."
     },
-    "catalog_path": {
-      "type": "string",
-      "description": "Directory of catalog entity files, relative to the site root."
-    },
     "audit": {
       "type": "object",
       "description": "Where per-incident audit logs are written. The repository must be private.",
       "additionalProperties": false,
-      "required": ["repo", "path"],
+      "required": [
+        "repo",
+        "path"
+      ],
       "properties": {
         "repo": {
           "$ref": "#/$defs/repoAlias"
@@ -87,6 +102,40 @@
       "type": "object",
       "description": "Reserved for the journeys and SLO milestone. Must be empty in schema version 1.",
       "maxProperties": 0
+    },
+    "catalog": {
+      "type": "object",
+      "description": "The service catalog: where entity files live and which sources its generated layer is built from.",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "default_owner"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Catalog directory, relative to the site root. Sync writes '<path>/generated/'; people write everywhere else under it."
+        },
+        "default_owner": {
+          "type": "string",
+          "pattern": "^(user|group):[a-z0-9][a-z0-9-]*$",
+          "description": "Entity ref that owns generated Resources."
+        },
+        "runbooks_repo": {
+          "$ref": "#/$defs/repoAlias",
+          "description": "Repository whose runbooks_path the 'runbooks' of a service are resolved against."
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/catalogSource"
+          }
+        }
+      }
+    },
+    "patterns_path": {
+      "type": "string",
+      "description": "Directory of deployment pattern pages, relative to the site root. A pattern id is a file name without '.md'."
     }
   },
   "$defs": {
@@ -102,7 +151,10 @@
     "repo": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repo", "visibility"],
+      "required": [
+        "repo",
+        "visibility"
+      ],
       "properties": {
         "repo": {
           "type": "string",
@@ -110,7 +162,10 @@
           "description": "owner/name on the code host."
         },
         "visibility": {
-          "enum": ["private", "public"]
+          "enum": [
+            "private",
+            "public"
+          ]
         },
         "path": {
           "type": "string",
@@ -135,14 +190,24 @@
     "monitoringSource": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "type"],
+      "required": [
+        "name",
+        "type"
+      ],
       "properties": {
         "name": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_-]*$"
         },
         "type": {
-          "enum": ["nagios", "wazuh", "grafana", "prometheus", "loki", "other"]
+          "enum": [
+            "nagios",
+            "wazuh",
+            "grafana",
+            "prometheus",
+            "loki",
+            "other"
+          ]
         },
         "description": {
           "type": "string"
@@ -160,6 +225,72 @@
           "description": "Names of environment variables that hold credentials. Never the values.",
           "items": {
             "$ref": "#/$defs/envVarName"
+          }
+        }
+      }
+    },
+    "catalogSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "repo",
+        "path"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Also the directory name under generated/."
+        },
+        "type": {
+          "enum": [
+            "ansible-inventory",
+            "argocd-applications",
+            "nagios-objects"
+          ]
+        },
+        "repo": {
+          "$ref": "#/$defs/repoAlias",
+          "description": "Repository alias with a local 'path'. The source is read from that checkout."
+        },
+        "path": {
+          "type": "string",
+          "description": "File or directory inside that repository."
+        },
+        "pattern": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Deployment pattern id recorded on every Resource this source generates."
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "exclude_groups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "ansible-inventory: skip hosts that belong to any of these groups."
+            },
+            "exclude_hosts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "ansible-inventory, nagios-objects: skip these host names."
+            },
+            "cluster": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "description": "argocd-applications: name of the cluster the applications deploy to. Generates one cluster Resource."
+            },
+            "kube_context": {
+              "type": "string",
+              "description": "argocd-applications: kubectl context for the optional --check-live report."
+            }
           }
         }
       }

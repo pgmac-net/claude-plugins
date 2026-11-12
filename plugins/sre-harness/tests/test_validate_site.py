@@ -27,7 +27,7 @@ def test_unknown_key_is_rejected(edit_site):
 
 
 def test_wrong_schema_version_is_rejected(edit_site):
-    site = edit_site(lambda doc: doc.update({"schema_version": 2}))
+    site = edit_site(lambda doc: doc.update({"schema_version": 3}))
     assert any("schema_version" in err for err in errors_for(site))
 
 

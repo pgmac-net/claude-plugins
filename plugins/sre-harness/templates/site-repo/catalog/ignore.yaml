@@ -1,0 +1,5 @@
+# Generated Resources that deliberately belong to no service.
+# Every entry needs a reason. The catalog check warns when an entry goes stale.
+ignore: []
+#  - ref: resource:host-build01
+#    reason: Scratch build host, rebuilt weekly; nothing depends on it.

@@ -26,6 +26,46 @@ _Avoid_: CMDB, inventory, registry
 One catalog record, in Backstage entity format: a Component, System, Resource or API.
 _Avoid_: Item, asset, CI
 
+**Service**:
+Something a person or another service depends on, recorded as one hand-written Component entity.
+_Avoid_: App, application, workload
+
+**Deployment unit**:
+One thing a source repository deploys or declares (a host, an ArgoCD application, a monitored host), recorded as one generated Resource entity.
+_Avoid_: App, instance, workload
+
+**System**:
+A group of services with a shared purpose, recorded as a System entity.
+_Avoid_: Area, domain, stack
+
+**Source**:
+A git checkout the generated layer is built from, read through one adapter.
+_Avoid_: Feed, integration, provider
+
+**Generated layer**:
+The part of the catalog written only by sync and rewritten wholesale on every run.
+_Avoid_: Auto catalog, discovered entities
+
+**Drift**:
+A mismatch between the generated layer and the hand-written entities: an uncatalogued deployment unit, a dangling reference, or a service missing what its tier requires.
+_Avoid_: Skew, staleness
+
+**Stale**:
+Said of a generated layer that differs from what its sources would produce now.
+_Avoid_: Drifted, out of date
+
+**Uncatalogued**:
+Said of a deployment unit that no service reaches and that is not deliberately ignored.
+_Avoid_: Orphan, unowned
+
+**Pattern**:
+An agreed way a service is shipped at a site, described on one page and referred to by id.
+_Avoid_: Template, blueprint, golden path
+
+**Unverified**:
+Said of a fact in a service entry that was drafted from evidence, or is not yet known, and that no person has confirmed.
+_Avoid_: Draft, TODO, assumed
+
 **Tier**:
 A level of reliability commitment assigned to a service, which sets how much process the service gets.
 _Avoid_: Priority, class, criticality level
