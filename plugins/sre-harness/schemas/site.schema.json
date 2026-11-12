@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pgmac-net/claude-plugins/plugins/sre-harness/schemas/site.schema.json",
+  "title": "sre-harness site configuration",
+  "description": "site.yaml at the root of a site repository. Holds site facts only. Secrets are never stored here: reference them by environment variable name.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "site", "repos", "tracker", "monitoring", "tiers_file", "catalog_path", "audit"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Short site identifier."
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "repos": {
+      "type": "object",
+      "description": "Repositories the harness reads or writes. The key is a local alias. 'catalog' is the site repository itself.",
+      "required": ["catalog"],
+      "additionalProperties": {
+        "$ref": "#/$defs/repo"
+      }
+    },
+    "tracker": {
+      "type": "object",
+      "description": "Where incident tracking issues are opened.",
+      "additionalProperties": false,
+      "required": ["repo", "incident_label"],
+      "properties": {
+        "repo": {
+          "$ref": "#/$defs/repoAlias"
+        },
+        "incident_label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "monitoring": {
+      "type": "array",
+      "description": "Monitoring and telemetry sources the agent may query.",
+      "items": {
+        "$ref": "#/$defs/monitoringSource"
+      }
+    },
+    "tiers_file": {
+      "type": "string",
+      "description": "Path to the service tier definitions, relative to the site root."
+    },
+    "catalog_path": {
+      "type": "string",
+      "description": "Directory of catalog entity files, relative to the site root."
+    },
+    "audit": {
+      "type": "object",
+      "description": "Where per-incident audit logs are written. The repository must be private.",
+      "additionalProperties": false,
+      "required": ["repo", "path"],
+      "properties": {
+        "repo": {
+          "$ref": "#/$defs/repoAlias"
+        },
+        "path": {
+          "type": "string",
+          "description": "Directory inside that repository."
+        }
+      }
+    },
+    "chat": {
+      "type": "object",
+      "description": "Reserved for the chat-ops milestone. Must be empty in schema version 1.",
+      "maxProperties": 0
+    },
+    "slo": {
+      "type": "object",
+      "description": "Reserved for the journeys and SLO milestone. Must be empty in schema version 1.",
+      "maxProperties": 0
+    }
+  },
+  "$defs": {
+    "repoAlias": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "A key of the top-level 'repos' map."
+    },
+    "envVarName": {
+      "type": "string",
+      "pattern": "^[A-Z_][A-Z0-9_]*$"
+    },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "visibility"],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "description": "owner/name on the code host."
+        },
+        "visibility": {
+          "enum": ["private", "public"]
+        },
+        "path": {
+          "type": "string",
+          "description": "Local checkout. '~' is expanded. Omit for the catalog repo, which is the site root."
+        },
+        "runbooks_path": {
+          "type": "string"
+        },
+        "pirs_path": {
+          "type": "string"
+        },
+        "templates_path": {
+          "type": "string"
+        },
+        "fallback_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Published copy to read when the local checkout is stale or missing."
+        }
+      }
+    },
+    "monitoringSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "type": {
+          "enum": ["nagios", "wazuh", "grafana", "prometheus", "loki", "other"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri"
+        },
+        "mcp_server": {
+          "type": "string",
+          "description": "Name of the MCP server that fronts this source, if any."
+        },
+        "credentials_env": {
+          "type": "array",
+          "description": "Names of environment variables that hold credentials. Never the values.",
+          "items": {
+            "$ref": "#/$defs/envVarName"
+          }
+        }
+      }
+    }
+  }
+}

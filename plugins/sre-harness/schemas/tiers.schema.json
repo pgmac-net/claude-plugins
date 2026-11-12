@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pgmac-net/claude-plugins/plugins/sre-harness/schemas/tiers.schema.json",
+  "title": "sre-harness service tier definitions",
+  "description": "Defines the service tiers of a site and what each tier requires. Services are assigned to tiers in their catalog entries, not here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tiers"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "tiers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "description", "requires"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requires": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": ["catalog_entry", "journeys", "slis", "slo", "error_budget_policy", "sla_report"]
+            }
+          },
+          "status_update_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Default interval between incident status updates for services in this tier."
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# Service tier definitions. Tiers set how much process a service gets.
+# Services are assigned a tier in their catalog entry, not here.
+schema_version: 1
+
+tiers:
+  - id: 1
+    name: critical
+    description: Other services or people depend on it. An outage is an incident.
+    requires: [catalog_entry, journeys, slis, slo, error_budget_policy, sla_report]
+    status_update_minutes: 30
+  - id: 2
+    name: standard
+    description: Useful, with a few users. An outage is inconvenient.
+    requires: [catalog_entry, slo]
+    status_update_minutes: 60
+  - id: 3
+    name: best-effort
+    description: Hobby or experimental. No reliability commitment.
+    requires: [catalog_entry]

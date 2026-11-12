@@ -7,6 +7,7 @@ Claude Code plugin marketplace for pgmac-net workflows. These skills also work w
 ```
 /plugin marketplace add pgmac-net/claude-plugins
 /plugin install pgmac-workflows@pgmac
+/plugin install sre-harness@pgmac
 ```
 
 ## Install for OpenCode
@@ -136,6 +137,16 @@ Skills trigger from their descriptions, or explicitly with `/skill:<name> [args]
 | `context-engineering` | Audit or write a `CLAUDE.md`/`AGENTS.md`/skill against Anthropic's context-engineering rules for Claude 5-generation models — gotchas-only, progressive disclosure, judgment over blanket prohibition. |
 
 `create-pir` and `pickup-ticket` default to `pgmac-net/homelabia` when no owning repo is identifiable. Adapt paths and defaults if you're not me.
+
+### sre-harness
+
+A portable SRE harness: the plugin holds logic only, and everything about one site lives in a private site repository you own. This release is the foundation; incident, catalog and SLO skills follow. See [`plugins/sre-harness/README.md`](plugins/sre-harness/README.md).
+
+| Skill | Purpose |
+|---|---|
+| `site-check` | Find the site repository, validate `site.yaml` and the tier definitions, and report what is configured and what is missing. |
+
+The scripts need [`uv`](https://docs.astral.sh/uv/). The OpenCode install scripts cover `pgmac-workflows` only; for `sre-harness`, symlink `plugins/sre-harness/skills/site-check` into `~/.config/opencode/skills/` by hand. Pi picks it up through the `package.json` glob.
 
 ## Adding a plugin
 

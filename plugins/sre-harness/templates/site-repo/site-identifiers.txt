@@ -1,0 +1,7 @@
+# Real identifiers of this site: hostnames, domains, addresses, usernames.
+# One literal per line. Used locally to check that none of them leak into the
+# portable plugin:
+#
+#   check_identifiers.py <plugin dir> --denylist site-identifiers.txt
+#
+# Keep this file in the private site repository only.

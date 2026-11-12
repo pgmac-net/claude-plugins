@@ -1,0 +1,50 @@
+# sre-harness site configuration. Validate with the plugin's scripts/validate_site.py.
+# Never put a secret here: name the environment variable that holds it.
+schema_version: 1
+
+site:
+  name: example
+  description: Example site. Replace every value below.
+
+repos:
+  # 'catalog' is this repository.
+  catalog:
+    repo: example-org/sre-catalog
+    visibility: private
+  incidents:
+    repo: example-org/incidents
+    visibility: private
+    path: ~/src/incidents
+    runbooks_path: docs/runbooks
+    pirs_path: docs/incidents
+    templates_path: docs/templates
+    fallback_url: https://incidents.example.com/
+
+tracker:
+  repo: incidents
+  incident_label: incident
+
+monitoring:
+  - name: alerts
+    type: nagios
+    description: Host and service checks. Source of alerts.
+    endpoint: https://monitoring.example.com/
+    mcp_server: nagios
+    credentials_env: [NAGIOS_USER, NAGIOS_PASSWORD]
+  - name: metrics
+    type: grafana
+    description: Metrics and logs. Source of SLIs.
+    endpoint: https://example.grafana.net/
+    credentials_env: [GRAFANA_TOKEN]
+
+tiers_file: tiers.yaml
+catalog_path: catalog
+
+# Audit logs record every command run during an incident. Keep them private.
+audit:
+  repo: catalog
+  path: audit
+
+# Reserved. Filled in by later schema versions.
+chat: {}
+slo: {}
