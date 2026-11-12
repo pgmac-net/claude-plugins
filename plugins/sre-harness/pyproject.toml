@@ -15,6 +15,10 @@ ignore = ["PLR2004"]
 [tool.pylint.format]
 max-line-length = 120
 
+[tool.pylint.design]
+# The adapters build nested documents; ruff's branch and statement limits still apply.
+max-locals = 20
+
 [tool.pylint."messages control"]
 # redefined-outer-name and the explicit "== []" comparisons are pytest idioms.
 disable = [

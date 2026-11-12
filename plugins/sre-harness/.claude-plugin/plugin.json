@@ -1,11 +1,19 @@
 {
   "name": "sre-harness",
-  "description": "Portable SRE harness: site configuration, service catalog and incident tooling driven by a private site repository. Foundations only in this release: site config schema, validator and the site-check skill",
-  "version": "0.1.0",
+  "description": "Portable SRE harness driven by a private site repository: site configuration, and a two-layer service catalog synced from Ansible, ArgoCD and Nagios sources with drift detection",
+  "version": "0.2.0",
   "author": {
     "name": "pgmac",
     "url": "https://github.com/pgmac"
   },
   "license": "MIT",
-  "keywords": ["sre", "reliability", "incident-response", "cmdb", "service-catalog", "slo", "audit"]
+  "keywords": [
+    "sre",
+    "reliability",
+    "incident-response",
+    "cmdb",
+    "service-catalog",
+    "slo",
+    "audit"
+  ]
 }

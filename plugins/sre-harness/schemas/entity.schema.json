@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pgmac-net/claude-plugins/plugins/sre-harness/schemas/entity.schema.json",
+  "title": "sre-harness catalog entity",
+  "description": "One catalog entity in Backstage entity format. Harness-specific facts sit under spec.sre. Entity refs are '<kind>:<name>' in the default namespace.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "backstage.io/v1alpha1"
+    },
+    "kind": {
+      "enum": [
+        "Component",
+        "Resource",
+        "System",
+        "User",
+        "Group",
+        "API"
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "maxLength": 63
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "spec": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Component"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "lifecycle",
+              "owner",
+              "sre"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "lifecycle": {
+                "enum": [
+                  "experimental",
+                  "production",
+                  "deprecated"
+                ]
+              },
+              "owner": {
+                "type": "string",
+                "pattern": "^(component|resource|system|user|group|api):[a-z0-9][a-z0-9-]*$"
+              },
+              "system": {
+                "type": "string",
+                "pattern": "^(system:)?[a-z0-9][a-z0-9-]*$"
+              },
+              "dependsOn": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^(component|resource|system|user|group|api):[a-z0-9][a-z0-9-]*$"
+                }
+              },
+              "sre": {
+                "$ref": "#/$defs/service"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Resource"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "required": [
+              "type",
+              "owner"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "owner": {
+                "type": "string",
+                "pattern": "^(component|resource|system|user|group|api):[a-z0-9][a-z0-9-]*$"
+              },
+              "system": {
+                "type": "string"
+              },
+              "dependsOn": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^(component|resource|system|user|group|api):[a-z0-9][a-z0-9-]*$"
+                }
+              },
+              "sre": {
+                "type": "object",
+                "description": "Facts derived by a sync adapter. Shape depends on the Resource type."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "System"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "additionalProperties": false,
+            "required": [
+              "owner"
+            ],
+            "properties": {
+              "owner": {
+                "type": "string",
+                "pattern": "^(component|resource|system|user|group|api):[a-z0-9][a-z0-9-]*$"
+              },
+              "domain": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "service": {
+      "type": "object",
+      "description": "What the harness needs to know about a service.",
+      "additionalProperties": false,
+      "required": [
+        "tier"
+      ],
+      "properties": {
+        "tier": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pattern": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Deployment pattern id."
+        },
+        "purpose": {
+          "type": "string",
+          "description": "What users lose when this service is down."
+        },
+        "runbooks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "Runbook files, relative to the runbooks directory."
+        },
+        "monitoring": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "Checks that watch this service beyond those on its Resources. Free text, usually '<host>: <check>'."
+        },
+        "evidence": {
+          "type": "array",
+          "description": "Where a claimed fact came from.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "claim",
+              "source"
+            ],
+            "properties": {
+              "claim": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "unverified": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Facts drafted but not confirmed by a person, or not yet known.",
+          "items": {
+            "enum": [
+              "dependencies",
+              "pattern",
+              "monitoring",
+              "runbooks",
+              "purpose",
+              "tier"
+            ]
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

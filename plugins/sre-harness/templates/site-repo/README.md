@@ -7,7 +7,8 @@ one site.
 |---|---|
 | `site.yaml` | Site configuration: repositories, monitoring sources, tracker, audit location |
 | `tiers.yaml` | Service tier definitions |
-| `catalog/` | Service catalog entities |
+| `catalog/` | Service catalog: generated Resources and hand-written services |
+| `patterns/` | Deployment pattern pages |
 | `audit/` | Per-incident audit logs |
 | `docs/adr/` | Site decisions |
 | `CONTEXT.md` | Site-specific terms |

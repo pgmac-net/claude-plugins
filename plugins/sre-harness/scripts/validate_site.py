@@ -18,20 +18,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import re
 import sys
 from collections import Counter
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-from jsonschema import Draft202012Validator
-
-SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas"
-SITE_ENV = "SRE_HARNESS_SITE"
-SITE_FILE = "site.yaml"
+import catalog_check
+from sre_common import SITE_ENV, SITE_FILE, Report, SiteError, load_yaml, print_findings, resolve_site, schema_errors
 
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
@@ -44,133 +38,6 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 OPAQUE_TOKEN = re.compile(r"^[A-Za-z0-9+=_-]{32,}$")
 OPAQUE_ENTROPY_BITS = 4.0
-
-
-class SiteError(Exception):
-    """The site repository could not be found or read."""
-
-
-@dataclass
-class Report:
-    """Outcome of validating one site."""
-
-    site_root: Path
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    summary: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def ok(self) -> bool:
-        """True when no errors were found."""
-        return not self.errors
-
-    def as_dict(self) -> dict[str, Any]:
-        """Serialisable form for --json output."""
-        return {
-            "site_root": str(self.site_root),
-            "ok": self.ok,
-            "errors": self.errors,
-            "warnings": self.warnings,
-            "summary": self.summary,
-        }
-
-
-def _pointer_file(env: dict[str, str], home: Path) -> Path:
-    config_home = env.get("XDG_CONFIG_HOME") or str(home / ".config")
-    return Path(config_home) / "sre-harness" / "site"
-
-
-def resolve_site(
-    explicit: str | None = None,
-    env: dict[str, str] | None = None,
-    home: Path | None = None,
-) -> Path:
-    """Find the site repository.
-
-    Order: explicit path, the SRE_HARNESS_SITE environment variable, then
-    ~/.config/sre-harness/site (a directory, a symlink to one, or a file whose
-    first line is the path). Never guesses beyond that.
-    """
-    env = dict(os.environ) if env is None else env
-    home = Path.home() if home is None else home
-
-    candidate: Path | None = None
-    source = ""
-    if explicit:
-        candidate, source = Path(explicit), "--site"
-    elif env.get(SITE_ENV):
-        candidate, source = Path(env[SITE_ENV]), SITE_ENV
-    else:
-        pointer = _pointer_file(env, home)
-        if pointer.is_dir():
-            candidate, source = pointer, str(pointer)
-        elif pointer.is_file():
-            lines = pointer.read_text(encoding="utf-8").strip().splitlines()
-            first = lines[0].strip() if lines else ""
-            if not first:
-                raise SiteError(f"{pointer} is empty; it must contain the path to the site repository")
-            candidate, source = Path(first), str(pointer)
-
-    if candidate is None:
-        raise SiteError(
-            f"no site configured: set {SITE_ENV} to the site repository path, or create {_pointer_file(env, home)}"
-        )
-
-    root = candidate.expanduser()
-    if not root.is_dir():
-        raise SiteError(f"site path from {source} is not a directory: {root}")
-    if not (root / SITE_FILE).is_file():
-        raise SiteError(f"no {SITE_FILE} in site path from {source}: {root}")
-    return root.resolve()
-
-
-def load_yaml(path: Path) -> Any:
-    """Parse one YAML file."""
-    try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise SiteError(f"{path}: not valid YAML: {exc}") from exc
-
-
-# Validators whose jsonschema message names keys only, never values.
-_KEY_ONLY_VALIDATORS = {"additionalProperties", "required"}
-_SAFE_TEMPLATES = {
-    "const": "must be {limit!r}",
-    "enum": "must be one of {limit}",
-    "pattern": "does not match the pattern {limit}",
-    "type": "must be of type {limit}",
-    "format": "is not a valid {limit}",
-    "maxProperties": "must have at most {limit} properties",
-    "minItems": "must have at least {limit} item(s)",
-    "minLength": "must be at least {limit} character(s) long",
-    "minimum": "must be at least {limit}",
-    "uniqueItems": "must not contain duplicates",
-}
-
-
-def _safe_message(err: Any) -> str:
-    """Describe a schema violation without echoing the offending value.
-
-    jsonschema's own messages quote the instance, which would print a secret
-    that was put in the wrong field.
-    """
-    if err.validator in _KEY_ONLY_VALIDATORS:
-        return err.message
-    template = _SAFE_TEMPLATES.get(err.validator)
-    if template is None:
-        return f"failed the '{err.validator}' check"
-    return template.format(limit=err.validator_value)
-
-
-def schema_errors(doc: Any, schema_name: str) -> list[str]:
-    """Return human-readable schema violations for a document. Values are never echoed."""
-    schema = json.loads((SCHEMA_DIR / schema_name).read_text(encoding="utf-8"))
-    validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
-    found = []
-    for err in sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path)):
-        where = "/".join(str(part) for part in err.absolute_path) or "(root)"
-        found.append(f"{where}: {_safe_message(err)}")
-    return found
 
 
 def _entropy(text: str) -> float:
@@ -211,6 +78,19 @@ def check_references(doc: dict[str, Any]) -> list[str]:
         alias = doc.get(section, {}).get("repo")
         if alias is not None and alias not in repos:
             errors.append(f"{section}/repo: '{alias}' is not a key of repos")
+    catalog = doc.get("catalog", {})
+    runbooks_repo = catalog.get("runbooks_repo")
+    if runbooks_repo is not None and runbooks_repo not in repos:
+        errors.append(f"catalog/runbooks_repo: '{runbooks_repo}' is not a key of repos")
+    for name, count in Counter(source["name"] for source in catalog.get("sources", [])).items():
+        if count > 1:
+            errors.append(f"catalog/sources: source name '{name}' is used {count} times")
+    for source in catalog.get("sources", []):
+        alias = source["repo"]
+        if alias not in repos:
+            errors.append(f"catalog/sources/{source['name']}/repo: '{alias}' is not a key of repos")
+        elif alias != "catalog" and not repos[alias].get("path"):
+            errors.append(f"catalog/sources/{source['name']}/repo: repos/{alias} has no local path to read from")
     audit_alias = doc.get("audit", {}).get("repo")
     if audit_alias in repos and repos[audit_alias].get("visibility") != "private":
         errors.append(
@@ -230,9 +110,12 @@ def check_paths(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], list[s
     tiers_file = doc.get("tiers_file")
     if tiers_file and not (site_root / tiers_file).is_file():
         errors.append(f"tiers_file: {tiers_file} does not exist in the site repository")
-    catalog_path = doc.get("catalog_path")
+    catalog_path = doc.get("catalog", {}).get("path")
     if catalog_path and not (site_root / catalog_path).is_dir():
-        errors.append(f"catalog_path: {catalog_path} is not a directory in the site repository")
+        errors.append(f"catalog/path: {catalog_path} is not a directory in the site repository")
+    patterns_path = doc.get("patterns_path")
+    if patterns_path and not (site_root / patterns_path).is_dir():
+        errors.append(f"patterns_path: {patterns_path} is not a directory in the site repository")
 
     repos = doc.get("repos", {})
     audit = doc.get("audit", {})
@@ -258,21 +141,21 @@ def check_paths(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], list[s
     return errors, warnings
 
 
-def check_tiers(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
-    """Validate the tier definitions file named by site.yaml."""
+def check_tiers(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any], dict[str, Any] | None]:
+    """Validate the tier definitions file named by site.yaml. Returns errors, summary and the document."""
     tiers_file = doc.get("tiers_file")
     if not tiers_file or not (site_root / tiers_file).is_file():
-        return [], {}
+        return [], {}, None
     tiers_doc = load_yaml(site_root / tiers_file)
     errors = [f"{tiers_file}: {msg}" for msg in schema_errors(tiers_doc, "tiers.schema.json")]
     if errors:
-        return errors, {}
+        return errors, {}, None
     tiers = tiers_doc["tiers"]
     for key in ("id", "name"):
         for value, count in Counter(tier[key] for tier in tiers).items():
             if count > 1:
                 errors.append(f"{tiers_file}: tier {key} '{value}' is used {count} times")
-    return errors, {"tiers": [f"{tier['id']}:{tier['name']}" for tier in tiers]}
+    return errors, {"tiers": [f"{tier['id']}:{tier['name']}" for tier in tiers]}, tiers_doc
 
 
 def validate(site_root: Path) -> Report:
@@ -292,16 +175,21 @@ def validate(site_root: Path) -> Report:
     path_errors, path_warnings = check_paths(site_root, doc)
     report.errors.extend(f"{SITE_FILE}: {msg}" for msg in path_errors)
     report.warnings.extend(f"{SITE_FILE}: {msg}" for msg in path_warnings)
-    tier_errors, tier_summary = check_tiers(site_root, doc)
+    tier_errors, tier_summary, tiers_doc = check_tiers(site_root, doc)
     report.errors.extend(tier_errors)
 
-    catalog_dir = site_root / doc["catalog_path"]
-    entities = sorted(catalog_dir.rglob("*.yaml")) if catalog_dir.is_dir() else []
+    catalog_summary: dict[str, Any] = {}
+    if not path_errors and not tier_errors:
+        catalog_report = catalog_check.check(site_root, doc, tiers_doc)
+        report.errors.extend(f"catalog: {msg}" for msg in catalog_report.errors)
+        report.warnings.extend(f"catalog: {msg}" for msg in catalog_report.warnings)
+        catalog_summary = catalog_report.summary
     report.summary = {
         "site": doc["site"]["name"],
         "repos": {alias: repo["visibility"] for alias, repo in doc["repos"].items()},
         "monitoring": [f"{src['name']} ({src['type']})" for src in doc["monitoring"]],
-        "catalog_entities": len(entities),
+        "catalog_sources": [f"{src['name']} ({src['type']})" for src in doc["catalog"].get("sources", [])],
+        "catalog": catalog_summary,
         "audit": f"{doc['audit']['repo']}:{doc['audit']['path']}",
         "chat_configured": bool(doc.get("chat")),
         "slo_configured": bool(doc.get("slo")),
@@ -312,12 +200,7 @@ def validate(site_root: Path) -> Report:
 
 def _print_report(report: Report) -> None:
     print(f"site: {report.site_root}")
-    for key, value in report.summary.items():
-        print(f"  {key}: {value}")
-    for warning in report.warnings:
-        print(f"WARNING {warning}")
-    for error in report.errors:
-        print(f"ERROR {error}")
+    print_findings(report.summary, report.warnings, report.errors)
     print("valid" if report.ok else f"invalid: {len(report.errors)} error(s)")
 
 

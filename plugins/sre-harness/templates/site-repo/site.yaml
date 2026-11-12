@@ -1,6 +1,6 @@
 # sre-harness site configuration. Validate with the plugin's scripts/validate_site.py.
 # Never put a secret here: name the environment variable that holds it.
-schema_version: 1
+schema_version: 2
 
 site:
   name: example
@@ -38,7 +38,35 @@ monitoring:
     credentials_env: [GRAFANA_TOKEN]
 
 tiers_file: tiers.yaml
-catalog_path: catalog
+patterns_path: patterns
+
+# The service catalog. Sync rewrites catalog/generated/ from these sources;
+# everything else under catalog/ is written by people.
+catalog:
+  path: catalog
+  default_owner: user:example-owner
+  runbooks_repo: incidents
+  # Each source reads a local git checkout, never a live system. The repo
+  # alias must have a 'path'. Uncomment and adapt:
+  sources: []
+  #  - name: hosts
+  #    type: ansible-inventory
+  #    repo: ansible
+  #    path: inventory/hosts.ini
+  #    options:
+  #      exclude_groups: [workstations]
+  #  - name: cluster-apps
+  #    type: argocd-applications
+  #    repo: gitops
+  #    path: apps
+  #    pattern: argocd-helm-app
+  #    options:
+  #      cluster: main
+  #      kube_context: main
+  #  - name: checks
+  #    type: nagios-objects
+  #    repo: nagios-config
+  #    path: objects
 
 # Audit logs record every command run during an incident. Keep them private.
 audit:

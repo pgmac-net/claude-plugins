@@ -1,0 +1,19 @@
+# Example service. Replace it, or delete it once you have real ones.
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: example-service
+  title: Example service
+  description: Shows the shape of a service entry.
+spec:
+  type: service
+  lifecycle: experimental
+  owner: user:example-owner
+  # Deployment units and other services this one needs, as entity refs:
+  # dependsOn:
+  #   - resource:app-example
+  #   - component:ingress
+  sre:
+    tier: 3
+    purpose: Nothing is lost when it is down; it is an example.
+    pattern: example-pattern
