@@ -1,0 +1,28 @@
+# Tool configuration only. The scripts declare their own dependencies inline
+# (PEP 723) and run with `uv run`; this plugin is not a Python package.
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "PL"]
+ignore = ["PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint."messages control"]
+# redefined-outer-name and the explicit "== []" comparisons are pytest idioms.
+disable = [
+    "missing-function-docstring",
+    "missing-class-docstring",
+    "redefined-outer-name",
+    "use-implicit-booleaness-not-comparison",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
