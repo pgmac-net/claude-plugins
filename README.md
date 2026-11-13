@@ -140,13 +140,17 @@ Skills trigger from their descriptions, or explicitly with `/skill:<name> [args]
 
 ### sre-harness
 
-A portable SRE harness: the plugin holds logic only, and everything about one site lives in a private site repository you own. It has the site configuration and the service catalog so far; incident and SLO skills follow. See [`plugins/sre-harness/README.md`](plugins/sre-harness/README.md).
+A portable SRE harness: the plugin holds logic only, and everything about one site lives in a private site repository you own. It has the site configuration, the service catalog and the incident skills so far; audit, autonomy tiers and SLO skills follow. See [`plugins/sre-harness/README.md`](plugins/sre-harness/README.md).
 
 | Skill | Purpose |
 |---|---|
 | `site-check` | Find the site repository, validate `site.yaml` and the tier definitions and the catalog, and report what is configured and what is missing. |
 | `catalog-sync` | Regenerate the catalog's generated layer from the site's Ansible, ArgoCD and Nagios source checkouts, report drift, and propose the change as a pull request. |
 | `describe-service` | Interview the user and write one valid service entry in the site catalog: tier, purpose, dependencies, pattern, runbooks. |
+| `start-incident` | Work a live incident against the configured site: open the tracking issue, triage using the site's procedures and catalog, gate every mutation on confirmation, keep a typed timeline with status updates, handover and summary. Supports drills. |
+| `create-pir` | Write the post-incident review from the timeline export: Infinite How's analysis, runbook decisions, catalog corrections, tracked action items, pull request. |
+
+`start-incident` and `create-pir` exist in both plugins while the portable versions are proven. In Claude Code, invoke the one you mean by its prefix (`/sre-harness:start-incident`). Pi and OpenCode load one skill per name and keep the first they find, which is the `pgmac-workflows` one.
 
 The scripts need [`uv`](https://docs.astral.sh/uv/); catalog sync also needs `git` and, for Helm-templated ArgoCD applications, `helm`. The OpenCode install scripts cover `pgmac-workflows` only; for `sre-harness`, symlink each directory under `plugins/sre-harness/skills/` into `~/.config/opencode/skills/` by hand. Pi picks it up through the `package.json` glob.
 

@@ -9,6 +9,7 @@ one site.
 | `tiers.yaml` | Service tier definitions |
 | `catalog/` | Service catalog: generated Resources and hand-written services |
 | `patterns/` | Deployment pattern pages |
+| `procedures/` | How incidents are worked here: monitoring access, evidence, comms, review format |
 | `audit/` | Per-incident audit logs |
 | `docs/adr/` | Site decisions |
 | `CONTEXT.md` | Site-specific terms |

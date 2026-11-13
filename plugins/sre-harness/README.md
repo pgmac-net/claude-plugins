@@ -2,7 +2,7 @@
 
 A portable harness for doing SRE work with an LLM agent: service catalog, incident triage and remediation, audit, user journeys and SLOs.
 
-So far it has two parts: how a site is described and checked, and a service catalog kept in step with the site's own repositories. Incident and SLO skills arrive in later releases.
+So far it has three parts: how a site is described and checked, a service catalog kept in step with the site's own repositories, and incident skills that keep a typed timeline. Audit capture, autonomy tiers and SLO skills arrive in later releases.
 
 ## How it is put together
 
@@ -61,6 +61,28 @@ uv run scripts/catalog_sync.py --check-live   # read-only: declared vs running A
 
 Ask the agent to "sync the catalog" (`catalog-sync`) or "describe a service" (`describe-service`).
 
+## Incidents
+
+An incident is one **tracking issue**: stable facts in its body, the **timeline** in its comments. Its id is `<repo-alias>-<issue number>`.
+
+```bash
+uv run scripts/incident.py open --title "…" --severity P2 --affected "…" --impact "…"   # --drill for practice
+uv run scripts/incident.py set --severity P1 --phase Mitigating
+uv run scripts/timeline.py add --type action --text "Restarted X, approved by the owner. Errors stopped within a minute."
+uv run scripts/timeline.py due        # is a status update owed?
+uv run scripts/timeline.py handover --state … --tried … --hypotheses … --next … --holder …
+uv run scripts/timeline.py export     # markdown, for the review
+uv run scripts/incident.py close      # resolved; the issue stays open for a person to close
+```
+
+Timeline entry types: `discovery`, `action`, `decision`, `milestone`, `update`, `handover`, `summary`. Each is one comment with a hidden marker line and a line people read. Comments typed by a person are kept as notes.
+
+**Site procedures.** The skills say *when*; the site says *how*. `site.yaml` lists procedure files per stage (`triage`, `evidence`, `comms`, `review`) under `incident.procedures`, and the skills read them at that stage. This is where monitoring access, fallbacks, evidence capture and review format live. See [ADR 0010](docs/adr/0010-site-procedures-carry-the-how.md).
+
+**Drills.** `--drill` tracks a practice incident in the private repository named by `incident.drill`, so nothing fake is published. A drill never mutates anything.
+
+Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`create-pir`).
+
 ## Contents
 
 | Path | Purpose |
@@ -68,29 +90,34 @@ Ask the agent to "sync the catalog" (`catalog-sync`) or "describe a service" (`d
 | `skills/site-check/` | Finds and validates the site; shared reference for loading site configuration |
 | `skills/catalog-sync/` | Regenerates the generated layer, reports drift, proposes a pull request |
 | `skills/describe-service/` | Interviews the user and writes one service entry |
-| `schemas/` | JSON Schema for `site.yaml` (version 2), tier definitions and catalog entities |
+| `skills/start-incident/` | Works a live incident: record, triage, gated recovery, typed timeline |
+| `skills/create-pir/` | Writes the post-incident review from the timeline |
+| `schemas/` | JSON Schema for `site.yaml` (version 3), tier definitions and catalog entities |
 | `scripts/validate_site.py` | Site validation: schema, paths, references, audit privacy, secret shapes, catalog |
 | `scripts/catalog_sync.py` | Source adapters and the generated layer |
 | `scripts/catalog_check.py` | Entity validation and drift report |
+| `scripts/incident.py` | Opens, updates and resolves the tracking issue |
+| `scripts/timeline.py` | Writes, reads and exports timeline entries; says when a status update is due |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
 | `templates/site-repo/` | Starter layout for a new site repository |
 | `docs/adr/` | Design decisions |
 | `CONTEXT.md` | Glossary |
 
-Scripts need [`uv`](https://docs.astral.sh/uv/); dependencies are declared inline. Catalog sync also needs `git`, and `helm` for chart areas.
+Scripts need [`uv`](https://docs.astral.sh/uv/); dependencies are declared inline. Catalog sync also needs `git`, and `helm` for chart areas. The incident scripts need the `gh` CLI, signed in.
 
-## Upgrading a site from schema version 1
+## Upgrading a site
 
-In `site.yaml`: set `schema_version: 2`, and replace `catalog_path: <dir>` with
+**From schema version 2 to 3.** Set `schema_version: 3` and add an `incident` section. Minimum:
 
 ```yaml
-catalog:
-  path: <dir>
-  default_owner: user:<name>   # must exist under <dir>/owners/
-  sources: []
+incident:
+  timezone: Etc/UTC          # IANA name
+  procedures_path: procedures
 ```
 
-Add `catalog_requires` to tiers in `tiers.yaml` to make the catalog check enforce what a service entry must state.
+Add `update_minutes`, `procedures`, `severity_criteria`, `evidence_dir` and `drill` as you write them; the template shows each.
+
+**From version 1 to 2.** Replace `catalog_path: <dir>` with a `catalog` section (`path`, `default_owner`, `sources`), and add `catalog_requires` to tiers to make the catalog check enforce what a service entry must state.
 
 ## Keeping site identifiers out
 

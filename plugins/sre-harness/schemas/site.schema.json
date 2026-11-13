@@ -13,11 +13,12 @@
     "monitoring",
     "tiers_file",
     "catalog",
-    "audit"
+    "audit",
+    "incident"
   ],
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "site": {
       "type": "object",
@@ -136,6 +137,148 @@
     "patterns_path": {
       "type": "string",
       "description": "Directory of deployment pattern pages, relative to the site root. A pattern id is a file name without '.md'."
+    },
+    "incident": {
+      "type": "object",
+      "description": "How incidents are worked at this site.",
+      "additionalProperties": false,
+      "required": [
+        "timezone",
+        "procedures_path"
+      ],
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "description": "IANA time zone for times shown to people, for example Europe/London. Times are stored in UTC."
+        },
+        "severity_criteria": {
+          "type": "object",
+          "description": "Where this site's P1 to P4 criteria are written down.",
+          "additionalProperties": false,
+          "required": [
+            "repo",
+            "path"
+          ],
+          "properties": {
+            "repo": {
+              "$ref": "#/$defs/repoAlias"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        "update_minutes": {
+          "type": "object",
+          "description": "Longest gap between status updates, by severity. A severity left out needs no scheduled updates.",
+          "additionalProperties": false,
+          "properties": {
+            "P1": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "P2": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "P3": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "P4": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "procedures_path": {
+          "type": "string",
+          "description": "Directory of site procedures, relative to the site root."
+        },
+        "procedures": {
+          "type": "object",
+          "description": "Which procedure files the agent reads at each stage. File names are relative to procedures_path.",
+          "additionalProperties": false,
+          "properties": {
+            "triage": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidence": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "comms": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "review": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "evidence_dir": {
+          "type": "string",
+          "description": "Local directory, outside any repository, for evidence gathered during an incident. '~' is expanded."
+        },
+        "drill": {
+          "type": "object",
+          "description": "Where practice incidents are tracked. Must be a private repository so that nothing fake is published.",
+          "additionalProperties": false,
+          "required": [
+            "repo",
+            "label"
+          ],
+          "properties": {
+            "repo": {
+              "$ref": "#/$defs/repoAlias"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "autonomy_file": {
+          "type": "string",
+          "description": "Allow-list of pre-approved actions, relative to the site root."
+        },
+        "assist": {
+          "type": "object",
+          "description": "Optional advisory helper. It never approves, blocks or selects an action.",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "enabled"
+          ],
+          "properties": {
+            "provider": {
+              "enum": [
+                "jev"
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "api_key_env": {
+              "$ref": "#/$defs/envVarName"
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
