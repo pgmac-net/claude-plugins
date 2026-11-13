@@ -1,0 +1,29 @@
+{
+  "description": "Audit log: records tool calls made during an incident. Does nothing when no incident is active, and never blocks a tool call.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -e \"${XDG_STATE_HOME:-$HOME/.local/state}/sre-harness/active\" || exit 0; python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/audit_hook.py\" || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -e \"${XDG_STATE_HOME:-$HOME/.local/state}/sre-harness/active\" || exit 0; python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/audit_hook.py\" || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -126,6 +126,10 @@ _Avoid_: Admin, operator, owner
 The machine-captured, append-only record of every command, tool call, approval and denial in an incident.
 _Avoid_: History, transcript, command log
 
+**Capture**:
+How an audit record came to exist: by the hook, or self-reported by an agent that has none.
+_Avoid_: Source, origin
+
 **Timeline**:
 The curated, human-readable record of an incident, made of typed entries on the incident issue.
 _Avoid_: Log, notes, journal

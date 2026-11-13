@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import secrets
 import sys
 from typing import Any
 
@@ -106,6 +107,25 @@ def set_section(body: str, heading: str, text: str) -> str:
     return pattern.sub(lambda match: f"{match.group(1)}{text.strip()}\n", body, count=1)
 
 
+def start_capture(state: dict[str, Any], doc: dict[str, Any]) -> None:
+    """Tell the audit hook an incident is live, which environment variables hold credentials, and issue a bind token."""
+    names = {name for source in doc.get("monitoring", []) for name in source.get("credentials_env", [])}
+    assist = doc["incident"].get("assist") or {}
+    if assist.get("api_key_env"):
+        names.add(assist["api_key_env"])
+    state["redact_env"] = sorted(names)
+    marker = sre_common.state_dir() / "active"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("an incident is open; the audit hook is capturing\n", encoding="utf-8")
+    # A random single-use token. The hook binds the session that prints it, and reads the
+    # incident id from this file, never from tool output.
+    token = secrets.token_hex(16)
+    binds = sre_common.state_dir() / "binds"
+    binds.mkdir(parents=True, exist_ok=True)
+    (binds / token).write_text(state["id"] + "\n", encoding="utf-8")
+    state["bind"] = token
+
+
 def cmd_open(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     alias, repo, label = tracker(doc, args.drill)
     existing = open_incidents(repo, label)
@@ -143,8 +163,10 @@ def cmd_open(args: argparse.Namespace, doc: dict[str, Any]) -> int:
         "opened_at": iso_utc(now),
         "status": "open",
     }
+    start_capture(state, doc)
+    token = state.pop("bind")
     sre_common.write_incident_state(state)
-    print(json.dumps({"id": state["id"], "url": url}))
+    print(json.dumps({"id": state["id"], "url": url, "bind": token}))
     return 0
 
 
@@ -168,8 +190,10 @@ def cmd_attach(args: argparse.Namespace, doc: dict[str, Any]) -> int:
         "opened_at": iso_utc(sre_common.parse_utc(issue["createdAt"])),
         "status": "open",
     }
+    start_capture(state, doc)
+    token = state.pop("bind")
     sre_common.write_incident_state(state)
-    print(json.dumps({"id": state["id"], "url": state["url"]}))
+    print(json.dumps({"id": state["id"], "url": state["url"], "bind": token}))
     return 0
 
 
@@ -211,6 +235,7 @@ def cmd_close(args: argparse.Namespace, _doc: dict[str, Any]) -> int:
     state.update({"status": "resolved", "resolved_at": iso_utc(utc_now())})
     sre_common.write_incident_state(state, make_current=False)
     print(f"{state['id']}: resolved. The tracking issue stays open until a person closes it.")
+    print("The audit hook is still capturing. When the review is written, run: audit.py commit")
     return 0
 
 

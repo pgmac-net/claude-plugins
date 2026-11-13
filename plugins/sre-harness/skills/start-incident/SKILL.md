@@ -1,7 +1,7 @@
 ---
 name: start-incident
 description: This skill should be used when the user says "start an incident", "we have an incident", "incident on <host or service>", "something's down", "run an incident drill", reports a live production problem, or asks for a handover or summary of an incident in progress. Takes a free-text description of the problem and drives triage, diagnosis and gated recovery, keeping a typed timeline that the create-pir skill consumes once the incident is resolved.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # Start Incident
@@ -22,7 +22,7 @@ State what you know and what you don't. "I don't know yet" beats a guessed root 
 | Tier | What | Rule |
 |---|---|---|
 | 0 | Read-only diagnostics | Run freely and immediately |
-| 1 | Any mutation: restart, delete, cordon, config write, anything a runbook lists under recovery | Stop. State the blast radius (`references/triage-stance.md`). Wait for a clear yes |
+| 1 | Any mutation: restart, delete, cordon, config write, anything a runbook lists under recovery | Stop. State the blast radius (`references/triage-stance.md`). Wait for a clear yes. Record the approval (`references/audit-log.md`). Then act |
 
 A runbook's recovery step is still a mutation. A drill never mutates anything.
 
@@ -47,7 +47,7 @@ A runbook's recovery step is still a mutation. A drill never mutates anything.
 
 3. **Match a runbook.** Start from the runbooks listed on the affected services' catalog entries, then the runbooks directory. Update your checkout first if the site procedure says how; if you cannot, proceed with the local copy and say it may be stale. Record a match, or the absence of one, as a `decision` entry and in the body (`incident.py set --runbook …`). "No runbook covered this" is itself a finding for the review.
 
-4. **Diagnose and act.** Tier 0 freely; Tier 1 only after confirmation. Record every action **and its observed effect** as an `action` entry: what was changed, who approved it, what happened next. Record findings as `discovery`, choices between options as `decision`.
+4. **Diagnose and act.** Tier 0 freely; Tier 1 only after confirmation, with the approval recorded in the audit log before the command runs. Record every action **and its observed effect** as an `action` entry: what was changed, who approved it, what happened next. Record findings as `discovery`, choices between options as `decision`.
 
 5. **Verify recovery.** Confirm through the same source that first showed the problem. Capture after-the-fix evidence if the site procedures call for it. Then:
 
@@ -57,7 +57,7 @@ A runbook's recovery step is still a mutation. A drill never mutates anything.
 
    This marks the incident resolved. The tracking issue stays open: closing it is a person's decision after review.
 
-6. **Hand off.** Post a `summary` entry, then point the user at the `create-pir` skill.
+6. **Hand off.** Post a `summary` entry, then point the user at the `create-pir` skill. The audit log is committed at the end of the review, not now.
 
 ## The timeline
 
@@ -77,6 +77,10 @@ If `due` is true, post an `update` entry now: current state, what changed since 
 
 **Handover**, when the user asks or someone else takes over: `timeline.py handover` with its five fields. **Summary**, on request: read `timeline.py export`, then post a `summary` entry in your own words.
 
+## The audit log
+
+A hook records every tool call you make while the incident is open; you do not write it. You add only what it cannot know: approvals and denials. If your agent has no hooks, you record commands yourself. All of it: `references/audit-log.md`.
+
 ## Gotchas
 
 - Opening the record late is the most common failure. The first minutes of symptoms are what reviews most often lack.
@@ -89,5 +93,6 @@ If `due` is true, post an `update` entry now: current state, what changed since 
 
 - `references/triage-stance.md` — stabilise versus diagnose, sizing blast radius, when to stop and hand a decision to the person
 - `references/incident-record.md` — the tracking issue, entry types, handover and summary formats, script usage
+- `references/audit-log.md` — what the hook captures, recording approvals, verifying and committing the log
 - `references/catalog-in-an-incident.md` — using the catalog to find what is affected and what to read
 - `../site-check/references/site-config.md` — loading site configuration

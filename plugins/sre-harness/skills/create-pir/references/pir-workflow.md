@@ -83,6 +83,22 @@ Run the site's validation command and fix what it reports before committing. The
 
 Comment on the tracking issue: the review, the pull request, every action item. Do not close it.
 
+## Step 11 — Commit the audit log
+
+```bash
+uv run <plugin root>/scripts/audit.py verify
+```
+
+State its findings in the review, plainly: how many records, how many were self-reported rather than captured by a hook, any attempt that never completed (a denied or interrupted command, worth a sentence each), and any capture errors. If the chain is broken, say so and stop: that is a finding for the person, not something to repair.
+
+Then, with the review's pull request open:
+
+```bash
+uv run <plugin root>/scripts/audit.py commit
+```
+
+This opens a second pull request, against the site's private audit location, and stops capture. Link it from the tracking issue only if that issue is private; the audit log's contents never go in a public place.
+
 ## Quality checklist
 
 **Review**
@@ -108,3 +124,4 @@ Comment on the tracking issue: the review, the pull request, every action item. 
 - [ ] The timeline export was the primary source.
 - [ ] Every action item links back to the incident.
 - [ ] The link-back comment is posted, and the issue was not closed.
+- [ ] The audit log is verified, its findings are in the review, and it is committed.

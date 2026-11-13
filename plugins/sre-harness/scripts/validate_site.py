@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
-import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -26,24 +24,8 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import catalog_check
+from redact import secret_label
 from sre_common import SITE_ENV, SITE_FILE, Report, SiteError, load_yaml, print_findings, resolve_site, schema_errors
-
-SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    ("GitHub token", re.compile(r"\b(?:gh[opsu]|github_pat)_[A-Za-z0-9_]{20,}")),
-    ("Slack token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
-    ("AWS access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("Grafana token", re.compile(r"\bgl(?:c|sa)_[A-Za-z0-9+/=_-]{20,}")),
-    ("API key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")),
-    ("credentials in URL", re.compile(r"://[^/\s:@]+:[^/\s@]+@")),
-)
-OPAQUE_TOKEN = re.compile(r"^[A-Za-z0-9+=_-]{32,}$")
-OPAQUE_ENTROPY_BITS = 4.0
-
-
-def _entropy(text: str) -> float:
-    counts = Counter(text)
-    return -sum(n / len(text) * math.log2(n / len(text)) for n in counts.values())
 
 
 def _walk_strings(node: Any, path: str = ""):
@@ -61,13 +43,9 @@ def find_secrets(doc: Any) -> list[str]:
     """Flag values that look like secrets. Values are never echoed."""
     found = []
     for path, value in _walk_strings(doc):
-        for label, pattern in SECRET_PATTERNS:
-            if pattern.search(value):
-                found.append(f"{path}: looks like a secret ({label}); reference it by environment variable name")
-                break
-        else:
-            if OPAQUE_TOKEN.match(value) and _entropy(value) >= OPAQUE_ENTROPY_BITS:
-                found.append(f"{path}: looks like a secret (opaque token); reference it by environment variable name")
+        label = secret_label(value)
+        if label:
+            found.append(f"{path}: looks like a secret ({label}); reference it by environment variable name")
     return found
 
 
