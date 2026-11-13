@@ -44,9 +44,8 @@ MAX_FIELD = 6000
 if redact.MAX_SCAN < MAX_FIELD:  # every character that can be sent must be scanned for secrets
     raise RuntimeError("MAX_FIELD must not exceed redact.MAX_SCAN")
 NONE_OPTION = "none"
-# When a field is cut, the cut moves back to the last whitespace within this many characters,
-# so that a token is never split.
-CUT_MARGIN = 512
+WHITESPACE = re.compile(r"\s")
+OMITTED = "[omitted: too long to send safely]"
 # Addresses that only mean something inside a site: RFC 1918, CGNAT, link-local,
 # IPv6 unique-local and link-local.
 PRIVATE_ADDRESS = re.compile(
@@ -127,9 +126,10 @@ class Masker:
         The order is what makes it safe:
 
         1. Cut first, to a window small enough that every character of it is
-           scanned. Nothing past the cut can be sent, masked or not. The cut
-           falls back to the last whitespace, so no token is split in two and
-           half a secret cannot be left at the end.
+           scanned. Nothing past the cut can be sent, masked or not. The cut is
+           always at whitespace, so no token is ever split and half a secret or
+           half an identifier cannot be left at the end. Text with no
+           whitespace to cut at is not sent at all.
         2. Redact secrets while the text is still as written. Masking first
            could change part of a secret and stop its pattern matching.
         3. Mask identifiers and addresses last, wherever they are not part of
@@ -138,9 +138,11 @@ class Masker:
         Nothing derived from the uncut text, such as a hash of it, is added.
         """
         if len(value) > MAX_FIELD:
-            window = value[:MAX_FIELD]
-            cut = max(window.rfind(" "), window.rfind("\n"), window.rfind("\t"))
-            value = window[:cut] if cut >= MAX_FIELD - CUT_MARGIN else window[: MAX_FIELD - CUT_MARGIN]
+            breaks = [match.start() for match in WHITESPACE.finditer(value, 0, MAX_FIELD + 1)]
+            if not breaks:
+                # One unbroken run longer than the limit. Any cut would split it, so none of it is sent.
+                return OMITTED
+            value = value[: breaks[-1]]
         value = redact.redact_text(value, self.env_values, limit=None, digest=False)
         for identifier in self.identifiers:
             pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(identifier)}(?![A-Za-z0-9])", re.IGNORECASE)

@@ -42,10 +42,11 @@ An automated security review of the first push found two ways masking could be b
 | An identifier joined to other text by `-` or `_` was not masked; IPv6 private and CGNAT addresses were not covered | An identifier is masked wherever it is not part of a longer run of letters and digits; unique-local and link-local IPv6, CGNAT and IPv4 link-local are masked |
 | Text was cut and redacted before masking, and a long string had a hash of its unmasked original appended | Nothing derived from the original is added. See the order below |
 | (second review) Masking before redaction could change part of a secret and stop its pattern matching; a secret straddling the scan boundary could be partly sent | The order is now: cut first, back to the last whitespace so no token is split; redact everything that remains; mask last. Every character that can be sent has been scanned |
+| (third review) With no whitespace near the cut, the fallback still cut inside an unbroken run | The cut is always at whitespace of any kind; text with none to cut at is replaced by a placeholder and not sent |
 
 ## Verification
 
-- 320 tests pass; ruff clean; pylint exit 0. The service call is replaced in
+- 328 tests pass; ruff clean; pylint exit 0. The service call is replaced in
   tests; nothing leaves the machine.
 - Live, with generic made-up text: an outage for all customers gave P1 (1.0);
   one slow dashboard for one user gave P4 (0.92); "deleted the stuck pod …

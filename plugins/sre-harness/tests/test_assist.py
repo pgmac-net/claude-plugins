@@ -168,6 +168,27 @@ class TestMasking:
         assert "ghp_" not in sent and token[:10] not in sent
         assert len(sent) <= assist.MAX_FIELD
 
+    def test_an_unbroken_run_longer_than_the_limit_is_not_sent_at_all(self, capsys, service):
+        blob = "A" * 3000 + "buildbox01" + "B" * 4000
+        run(capsys, "entry-type", "--text", blob)
+        assert service[0]["state"]["entry"] == assist.OMITTED
+
+    def test_a_long_run_at_the_end_is_dropped_whole_however_long_it_is(self, capsys, service):
+        """No fallback hard cut: a 2,000-character run crossing the limit goes entirely."""
+        run_start = assist.MAX_FIELD - 1500
+        text = ("w " * 4000)[: run_start - 1] + " " + "secretbuildbox01" * 200
+        run(capsys, "entry-type", "--text", text)
+        sent = service[0]["state"]["entry"]
+        assert "secret" not in sent and "buildbox01" not in sent
+        assert len(sent) <= run_start
+
+    @pytest.mark.parametrize("space", ["\r", "\f", "\v", "\u00a0", "\n", "\t"])
+    def test_any_whitespace_is_a_place_to_cut(self, capsys, service, space):
+        token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+        text = "x" * (assist.MAX_FIELD - 20) + space + token + space + "tail"
+        run(capsys, "entry-type", "--text", text)
+        assert service[0]["state"]["entry"] == "x" * (assist.MAX_FIELD - 20)
+
     def test_a_huge_secret_early_cannot_pull_unscanned_text_into_view(self, capsys, service):
         token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
         key = "-----BEGIN " + "PRIVATE KEY-----\n" + "A" * 5000 + "\n-----END " + "PRIVATE KEY-----"
