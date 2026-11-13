@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Claude Code plugins for pgmac-net workflows: incident management, ticket workflows, homelab operations, and a portable SRE harness",
-    "version": "1.13.0"
+    "version": "1.14.0"
   },
   "plugins": [
     {
@@ -24,8 +24,8 @@
     {
       "name": "sre-harness",
       "source": "./plugins/sre-harness",
-      "description": "Portable SRE harness driven by a private site repository: site configuration, and a two-layer service catalog synced from Ansible, ArgoCD and Nagios sources with drift detection",
-      "version": "0.2.0",
+      "description": "Portable SRE harness driven by a private site repository: site configuration, a two-layer service catalog with drift detection, and incident skills with a typed timeline",
+      "version": "0.3.0",
       "author": {
         "name": "pgmac",
         "url": "https://github.com/pgmac"

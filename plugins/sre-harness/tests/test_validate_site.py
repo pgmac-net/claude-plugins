@@ -27,7 +27,7 @@ def test_unknown_key_is_rejected(edit_site):
 
 
 def test_wrong_schema_version_is_rejected(edit_site):
-    site = edit_site(lambda doc: doc.update({"schema_version": 3}))
+    site = edit_site(lambda doc: doc.update({"schema_version": 99}))
     assert any("schema_version" in err for err in errors_for(site))
 
 
@@ -169,3 +169,34 @@ class TestMain:
     def test_unresolved_site_exits_two(self, tmp_path, capsys):
         assert vs.main(["--site", str(tmp_path / "missing")]) == 2
         assert "not a directory" in capsys.readouterr().err
+
+
+class TestIncidentSection:
+    def test_unknown_timezone_is_rejected(self, edit_site):
+        site = edit_site(lambda doc: doc["incident"].update({"timezone": "Mars/Olympus"}))
+        assert any("incident/timezone" in err for err in errors_for(site))
+
+    def test_missing_procedure_file_is_rejected(self, edit_site):
+        site = edit_site(lambda doc: doc["incident"]["procedures"].update({"triage": ["nope.md"]}))
+        assert any("incident/procedures/triage: nope.md not found" in err for err in errors_for(site))
+
+    def test_drill_tracker_must_be_private(self, edit_site):
+        def mutate(doc):
+            doc["repos"]["incidents"]["visibility"] = "public"
+            doc["incident"]["drill"]["repo"] = "incidents"
+
+        assert any("practice incidents must not be published" in err for err in errors_for(edit_site(mutate)))
+
+    def test_enabled_assist_needs_a_key_variable(self, edit_site):
+        site = edit_site(lambda doc: doc["incident"].update({"assist": {"provider": "jev", "enabled": True}}))
+        assert any("incident/assist" in err for err in errors_for(site))
+
+    def test_unknown_severity_in_cadence_is_rejected(self, edit_site):
+        site = edit_site(lambda doc: doc["incident"]["update_minutes"].update({"P9": 5}))
+        assert any("incident/update_minutes" in err for err in errors_for(site))
+
+    def test_summary_reports_the_incident_settings(self, site):
+        summary = vs.validate(site).summary["incident"]
+        assert summary["timezone"] == "Etc/UTC"
+        assert summary["update_minutes"] == {"P1": 30, "P2": 60, "P3": 240}
+        assert summary["drill"] == "catalog (drill)"

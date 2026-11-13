@@ -1,6 +1,6 @@
 # sre-harness site configuration. Validate with the plugin's scripts/validate_site.py.
 # Never put a secret here: name the environment variable that holds it.
-schema_version: 2
+schema_version: 3
 
 site:
   name: example
@@ -72,6 +72,33 @@ catalog:
 audit:
   repo: catalog
   path: audit
+
+# How incidents are worked here.
+incident:
+  # Times are stored in UTC and shown to people in this zone.
+  timezone: Etc/UTC
+  # Where this site's P1 to P4 criteria are written down.
+  severity_criteria:
+    repo: incidents
+    path: docs/templates/pir-template.md
+  # Longest gap between status updates. A severity left out needs none.
+  update_minutes:
+    P1: 30
+    P2: 60
+    P3: 240
+  # Site procedures: how things are done here. The harness says when to read
+  # them; these files say how.
+  procedures_path: procedures
+  procedures:
+    triage: [triage.md]
+    evidence: [evidence.md]
+    comms: [comms.md]
+    review: [review.md]
+  evidence_dir: ~/incident-evidence
+  # Practice incidents are tracked here, never in a public repository.
+  drill:
+    repo: catalog
+    label: drill
 
 # Reserved. Filled in by later schema versions.
 chat: {}

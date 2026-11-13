@@ -23,6 +23,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import catalog_check
 from sre_common import SITE_ENV, SITE_FILE, Report, SiteError, load_yaml, print_findings, resolve_site, schema_errors
@@ -141,6 +142,55 @@ def check_paths(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], list[s
     return errors, warnings
 
 
+def check_incident(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
+    """The incident section must name a real time zone, existing procedures and a private drill tracker."""
+    errors = []
+    incident = doc.get("incident", {})
+    repos = doc.get("repos", {})
+    try:
+        ZoneInfo(incident.get("timezone", ""))
+    except (ZoneInfoNotFoundError, ValueError):
+        errors.append("incident/timezone: not a known IANA time zone")
+
+    procedures_dir = site_root / incident.get("procedures_path", "")
+    if not procedures_dir.is_dir():
+        errors.append(
+            f"incident/procedures_path: {incident.get('procedures_path')} is not a directory in the site repository"
+        )
+    else:
+        for stage, files in incident.get("procedures", {}).items():
+            for name in files:
+                if not (procedures_dir / name).is_file():
+                    errors.append(f"incident/procedures/{stage}: {name} not found in {incident['procedures_path']}")
+
+    criteria = incident.get("severity_criteria")
+    if criteria and criteria["repo"] not in repos:
+        errors.append(f"incident/severity_criteria/repo: '{criteria['repo']}' is not a key of repos")
+    drill = incident.get("drill")
+    if drill:
+        if drill["repo"] not in repos:
+            errors.append(f"incident/drill/repo: '{drill['repo']}' is not a key of repos")
+        elif repos[drill["repo"]].get("visibility") != "private":
+            errors.append(
+                f"incident/drill/repo: '{drill['repo']}' is not private; practice incidents must not be published"
+            )
+    autonomy_file = incident.get("autonomy_file")
+    if autonomy_file and not (site_root / autonomy_file).is_file():
+        errors.append(f"incident/autonomy_file: {autonomy_file} does not exist in the site repository")
+    assist = incident.get("assist")
+    if assist and assist["enabled"] and not assist.get("api_key_env"):
+        errors.append("incident/assist: enabled but no api_key_env names where the key is held")
+
+    summary = {
+        "timezone": incident.get("timezone"),
+        "update_minutes": incident.get("update_minutes", {}),
+        "procedures": {stage: len(files) for stage, files in incident.get("procedures", {}).items()},
+        "drill": f"{drill['repo']} ({drill['label']})" if drill else None,
+        "assist": assist["provider"] if assist and assist["enabled"] else None,
+    }
+    return errors, summary
+
+
 def check_tiers(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any], dict[str, Any] | None]:
     """Validate the tier definitions file named by site.yaml. Returns errors, summary and the document."""
     tiers_file = doc.get("tiers_file")
@@ -177,6 +227,8 @@ def validate(site_root: Path) -> Report:
     report.warnings.extend(f"{SITE_FILE}: {msg}" for msg in path_warnings)
     tier_errors, tier_summary, tiers_doc = check_tiers(site_root, doc)
     report.errors.extend(tier_errors)
+    incident_errors, incident_summary = check_incident(site_root, doc)
+    report.errors.extend(f"{SITE_FILE}: {msg}" for msg in incident_errors)
 
     catalog_summary: dict[str, Any] = {}
     if not path_errors and not tier_errors:
@@ -191,6 +243,7 @@ def validate(site_root: Path) -> Report:
         "catalog_sources": [f"{src['name']} ({src['type']})" for src in doc["catalog"].get("sources", [])],
         "catalog": catalog_summary,
         "audit": f"{doc['audit']['repo']}:{doc['audit']['path']}",
+        "incident": incident_summary,
         "chat_configured": bool(doc.get("chat")),
         "slo_configured": bool(doc.get("slo")),
         **tier_summary,

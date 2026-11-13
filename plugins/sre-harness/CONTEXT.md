@@ -131,8 +131,32 @@ The curated, human-readable record of an incident, made of typed entries on the 
 _Avoid_: Log, notes, journal
 
 **Timeline entry**:
-One timeline record with a type: discovery, milestone, update, handover, summary or decision.
+One timeline record with a type: discovery, action, decision, milestone, update, handover or summary.
 _Avoid_: Comment, note
+
+**Site procedure**:
+A document in the site repository, written for the agent, saying how something is done at that site; the harness's skills say when it is read.
+_Avoid_: Playbook, site notes, local docs
+
+**Tracking issue**:
+The one issue that is an incident's record: stable facts in its body, the timeline in its comments.
+_Avoid_: Ticket, hold-all, incident page
+
+**Incident id**:
+The repository alias and issue number of the tracking issue, written `<alias>-<number>`.
+_Avoid_: Incident number, reference
+
+**Status update**:
+A timeline entry of type update, owed at an interval the site sets per severity.
+_Avoid_: Heartbeat, check-in
+
+**Handover**:
+A timeline entry that passes an incident to someone else, with five fixed fields.
+_Avoid_: Handoff note
+
+**Drill**:
+A practice incident, worked end to end without mutations and tracked in a private repository.
+_Avoid_: Test incident, game day, simulation
 
 **Runbook**:
 A documented procedure for one failure mode, with diagnosis separated from recovery.
