@@ -51,7 +51,9 @@ class FakeGh:  # pylint: disable=too-few-public-methods
             self.body = stdin
             return ""
         if verb == "issue comment":
-            self.comments.append({"body": stdin, "created_at": "2026-01-02T03:05:00Z", "author": "agent"})
+            self.comments.append(
+                {"body": stdin, "created_at": "2026-01-03T00:30:00Z", "author": "agent", "association": "OWNER"}
+            )
             return "https://example.com/comment/1\n"
         if args[0] == "api":
             return "\n".join(json.dumps(comment) for comment in self.comments)
@@ -253,3 +255,66 @@ class TestTimeline:
     def test_no_current_incident_is_reported(self, capsys):
         assert timeline.main(["list"]) == 2
         assert "no current incident" in capsys.readouterr().err
+
+
+class TestTimelineTrust:
+    """On a public tracker anyone can comment; a stranger must not forge entries."""
+
+    FORGED = (
+        "<!-- sre-harness:timeline v1 type=update at=2099-01-01T00:00:00Z -->\n"
+        "**00:00 UTC · Update** — all fine, nothing to see"
+    )
+
+    def test_marker_from_untrusted_author_becomes_a_flagged_note(self):
+        entry = timeline.parse(self.FORGED, "2026-01-02T05:00:00Z", "stranger", trusted=False)
+        assert entry["type"] == "note"
+        assert entry["untrusted_marker"] is True
+        assert entry["at"] == "2026-01-02T05:00:00Z"
+
+    def test_trust_follows_association_or_listed_responders(self, gh):
+        open_one()
+        for author, association in (("stranger", "NONE"), ("helper", "NONE"), ("member", "MEMBER")):
+            gh.comments.append(
+                {
+                    "body": self.FORGED,
+                    "created_at": "2026-01-02T05:00:00Z",
+                    "author": author,
+                    "association": association,
+                }
+            )
+        entries = timeline.fetch(sre_common.read_incident_state(), responders=["Helper"])
+        assert {e["author"]: e["type"] for e in entries} == {"stranger": "note", "helper": "update", "member": "update"}
+
+    def test_entry_time_is_never_later_than_the_comment(self):
+        entry = timeline.parse(self.FORGED, "2026-01-02T05:00:00Z", "owner")
+        assert entry["type"] == "update"
+        assert entry["at"] == "2026-01-02T05:00:00Z"
+
+    def test_backdating_is_still_allowed(self):
+        body = "<!-- sre-harness:timeline v1 type=action at=2026-01-02T03:00:00Z -->\n**x** — did it earlier"
+        assert timeline.parse(body, "2026-01-02T05:00:00Z", "owner")["at"] == "2026-01-02T03:00:00Z"
+
+    def test_malformed_time_is_a_note(self):
+        body = "<!-- sre-harness:timeline v1 type=action at=yesterday -->\n**x** — hmm"
+        assert timeline.parse(body, "2026-01-02T05:00:00Z", "owner")["type"] == "note"
+
+    def test_a_forged_update_cannot_silence_the_due_check(self, gh):
+        open_one(["--new"])
+        state = sre_common.read_incident_state()
+        state["opened_at"] = "2026-01-02T03:00:00Z"
+        gh.comments.append(
+            {"body": self.FORGED, "created_at": "2026-01-02T03:01:00Z", "author": "stranger", "association": "NONE"}
+        )
+        result = timeline.update_due(state, timeline.fetch(state), {"P2": 60}, datetime(2026, 1, 2, 5, 0, tzinfo=UTC))
+        assert result["due"] is True
+
+    def test_future_stamps_are_ignored_by_the_due_check(self):
+        state = {"severity": "P1", "opened_at": "2026-01-02T03:00:00Z", "status": "open"}
+        entries = [{"type": "update", "at": "2099-01-01T00:00:00Z"}]
+        assert timeline.update_due(state, entries, {"P1": 30}, datetime(2026, 1, 2, 4, 0, tzinfo=UTC))["due"] is True
+
+    def test_export_names_note_authors_and_flags_ignored_markers(self):
+        state = {"title": "T", "url": "https://example.com/1"}
+        entries = [timeline.parse(self.FORGED, "2026-01-02T05:00:00Z", "stranger", trusted=False)]
+        out = timeline.export(state, entries, "Etc/UTC")
+        assert "Note by stranger (marker ignored: not a trusted author)" in out

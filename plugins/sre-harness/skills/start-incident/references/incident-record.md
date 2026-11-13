@@ -38,6 +38,8 @@ Pass `--at` when recording something after the fact; the default is now. Long te
 
 Comments typed by a person on the issue need no marker. They are kept and exported as `note`.
 
+**Who is trusted.** A marker counts only when the comment's author is the tracker repository's owner, a member or a collaborator, or is listed under `incident.responders` in `site.yaml`. A marked comment from anyone else is kept as a note and flagged in the export. On a public tracker anyone can comment; this stops a stranger forging a typed entry. An entry's time may be backdated with `--at`, but is never later than when its comment was posted.
+
 Granularity: one entry per thing a reviewer would want to find. First symptom, each monitoring source consulted, the runbook decision, each diagnostic with its result, each action with its effect, recovery confirmed.
 
 ## Status updates

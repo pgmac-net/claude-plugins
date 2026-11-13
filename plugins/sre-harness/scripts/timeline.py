@@ -18,7 +18,9 @@ Commands:
   export    render the timeline as markdown, for a review document
 
 A comment without a marker (typed by a person on the issue) is kept and
-shown as a 'note'.
+shown as a 'note'. So is a comment that carries a marker but was not posted
+by a trusted author: on a public tracker anyone can comment, and a stranger
+must not be able to forge a typed entry or its time.
 
 Exit codes: 0 ok, 2 the site or the code host could not be used.
 """
@@ -55,28 +57,56 @@ def render(entry_type: str, text: str, moment, timezone: str) -> str:
     return f"{marker}\n**{local_clock(moment, timezone)} · {entry_type.capitalize()}** — {text.strip()}\n"
 
 
-def parse(body: str, created_at: str, author: str) -> dict[str, Any]:
-    """Turn one issue comment into a timeline entry."""
+TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
+
+
+def parse(body: str, created_at: str, author: str, trusted: bool = True) -> dict[str, Any]:
+    """Turn one issue comment into a timeline entry.
+
+    A marker is honoured only from a trusted author. On a public tracker anyone
+    can comment, so a marker from anyone else is kept as a note and flagged. An
+    entry may be backdated, but its time is never later than when the comment
+    was posted.
+    """
+    posted = parse_utc(created_at)
     lines = body.replace("\r\n", "\n").split("\n")
     match = MARKER.match(lines[0]) if lines else None
-    if match and match.group(1) in TYPES:
-        text = VISIBLE.sub("", "\n".join(lines[1:]).strip(), count=1)
-        return {"type": match.group(1), "at": iso_utc(parse_utc(match.group(2))), "text": text, "author": author}
-    return {"type": "note", "at": iso_utc(parse_utc(created_at)), "text": body.strip(), "author": author}
+    note = {"type": "note", "at": iso_utc(posted), "text": body.strip(), "author": author}
+    if not match or match.group(1) not in TYPES:
+        return note
+    if not trusted:
+        return {**note, "text": "\n".join(lines[1:]).strip(), "untrusted_marker": True}
+    try:
+        claimed = parse_utc(match.group(2))
+    except ValueError:
+        return note
+    text = VISIBLE.sub("", "\n".join(lines[1:]).strip(), count=1)
+    return {"type": match.group(1), "at": iso_utc(min(claimed, posted)), "text": text, "author": author}
 
 
-def fetch(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every entry of an incident's timeline, oldest first."""
+def fetch(state: dict[str, Any], responders: list[str] | None = None) -> list[dict[str, Any]]:
+    """Every entry of an incident's timeline, oldest first.
+
+    Trusted authors are the repository's owner, members and collaborators, plus
+    any login the site lists under incident.responders.
+    """
     out = sre_common.run_gh(
         [
             "api",
             f"repos/{state['repo']}/issues/{state['number']}/comments",
             "--paginate",
             "--jq",
-            ".[] | {body: .body, created_at: .created_at, author: .user.login}",
+            ".[] | {body: .body, created_at: .created_at, author: .user.login, association: .author_association}",
         ]
     )
-    entries = [parse(**json.loads(line)) for line in out.splitlines() if line.strip()]
+    allowed = {login.lower() for login in responders or []}
+    entries = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        comment = json.loads(line)
+        trusted = comment.get("association") in TRUSTED_ASSOCIATIONS or comment["author"].lower() in allowed
+        entries.append(parse(comment["body"], comment["created_at"], comment["author"], trusted))
     return sorted(entries, key=lambda entry: entry["at"])
 
 
@@ -97,7 +127,7 @@ def update_due(state: dict[str, Any], entries: list[dict[str, Any]], cadence: di
     limit = cadence.get(severity or "")
     if state.get("status") == "resolved" or limit is None:
         return {"due": False, "reason": f"no scheduled updates for {severity or 'an unset severity'}"}
-    stamps = [entry["at"] for entry in entries if entry["type"] in STATUS_TYPES]
+    stamps = [entry["at"] for entry in entries if entry["type"] in STATUS_TYPES and parse_utc(entry["at"]) <= now]
     last = parse_utc(max(stamps)) if stamps else parse_utc(state["opened_at"])
     waited = int((now - last).total_seconds() // 60)
     return {
@@ -120,7 +150,12 @@ def export(state: dict[str, Any], entries: list[dict[str, Any]], timezone: str) 
             day = local.date()
             lines += [f"### {day.isoformat()}", ""]
         head, *rest = entry["text"].split("\n")
-        lines.append(f"- **{local.strftime('%H:%M')}** · {entry['type'].capitalize()} — {head}")
+        label = entry["type"].capitalize()
+        if entry["type"] == "note":
+            label = f"Note by {entry['author']}" + (
+                " (marker ignored: not a trusted author)" if entry.get("untrusted_marker") else ""
+            )
+        lines.append(f"- **{local.strftime('%H:%M')}** · {label} — {head}")
         lines += [f"  {line}" for line in rest]
     counts = {name: sum(1 for entry in entries if entry["type"] == name) for name in (*TYPES, "note")}
     summary = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
@@ -142,19 +177,20 @@ def cmd_handover(args, state, doc) -> int:
     return 0
 
 
-def cmd_list(_args, state, _doc) -> int:
-    print(json.dumps(fetch(state), indent=2))
+def cmd_list(_args, state, doc) -> int:
+    print(json.dumps(fetch(state, doc["incident"].get("responders")), indent=2))
     return 0
 
 
 def cmd_due(_args, state, doc) -> int:
-    result = update_due(state, fetch(state), doc["incident"].get("update_minutes", {}), utc_now())
+    entries = fetch(state, doc["incident"].get("responders"))
+    result = update_due(state, entries, doc["incident"].get("update_minutes", {}), utc_now())
     print(json.dumps(result))
     return 0
 
 
 def cmd_export(args, state, doc) -> int:
-    text = export(state, fetch(state), doc["incident"]["timezone"])
+    text = export(state, fetch(state, doc["incident"].get("responders")), doc["incident"]["timezone"])
     if args.out:
         Path(args.out).expanduser().write_text(text, encoding="utf-8")
         print(f"wrote {args.out}")

@@ -75,7 +75,7 @@ uv run scripts/timeline.py export     # markdown, for the review
 uv run scripts/incident.py close      # resolved; the issue stays open for a person to close
 ```
 
-Timeline entry types: `discovery`, `action`, `decision`, `milestone`, `update`, `handover`, `summary`. Each is one comment with a hidden marker line and a line people read. Comments typed by a person are kept as notes.
+Timeline entry types: `discovery`, `action`, `decision`, `milestone`, `update`, `handover`, `summary`. Each is one comment with a hidden marker line and a line people read. Comments typed by a person are kept as notes. A marker is honoured only from the tracker repository's owner, members and collaborators, or a login listed under `incident.responders`; from anyone else it is kept as a flagged note, so a stranger commenting on a public tracker cannot forge an entry or its time.
 
 **Site procedures.** The skills say *when*; the site says *how*. `site.yaml` lists procedure files per stage (`triage`, `evidence`, `comms`, `review`) under `incident.procedures`, and the skills read them at that stage. This is where monitoring access, fallbacks, evidence capture and review format live. See [ADR 0010](docs/adr/0010-site-procedures-carry-the-how.md).
 

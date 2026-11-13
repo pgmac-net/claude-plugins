@@ -277,6 +277,15 @@
               "$ref": "#/$defs/envVarName"
             }
           }
+        },
+        "responders": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
+          },
+          "description": "Code-host logins whose timeline entries are trusted, beyond the tracker repository's owner, members and collaborators."
         }
       }
     }

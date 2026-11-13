@@ -87,9 +87,13 @@ procedures to read.
 | Drills | Tracked in a private repository; never mutate |
 | Shared skill names | Old and new share names. Claude Code separates them by plugin prefix; Pi and OpenCode keep the first found, the old one |
 
+## Found in review
+
+An automated security review of the first push found that timeline markers were trusted from any commenter. With a public tracker, a stranger could forge a typed entry, give it a false time, and silence the status-update check. Markers now count only from the repository's owner, members and collaborators, or logins the site lists as responders; entry times are clamped to the comment's own time; future stamps are ignored by the due check.
+
 ## Verification
 
-- 107 tests pass; ruff clean; pylint 10.00/10. `gh` is replaced by a recorder in tests.
+- 115 tests pass; ruff clean; pylint 10.00/10. `gh` is replaced by a recorder in tests.
 - Live smoke test against the code host: a drill issue opened in a private
   repository, typed entries posted, body edited, `due` and `export` run,
   incident resolved. The test issue was then closed.
