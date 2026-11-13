@@ -34,6 +34,7 @@ import argparse
 import hashlib
 import json
 import re
+import shlex
 import shutil
 import subprocess  # noqa: S404 - fixed argv, no shell
 import sys
@@ -93,10 +94,149 @@ def verify(entries: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
         "attempts_without_completion": [
             {"ts": record["ts"], "tool": record.get("tool"), "input": record.get("input")} for record in unfinished
         ],
+        "approvals": events.get("approval", 0),
+        "tier2_claims": events.get("tier2", 0),
+        "unauthorised_mutations": unauthorised_mutations(entries),
+        "mutation_detection": (
+            "pattern-based on shell commands, per simple command; a command too long to classify counts as a "
+            "mutation; file edits made with other tools are not classified"
+        ),
         "rebinds": events.get("rebind", 0),
         "state_dir_access": state_dir_access(entries),
         "leftover_secrets": leftover_secrets(entries),
     }
+
+
+# Commands that change a system. Deliberately broad: a false positive costs a line in a
+# report, a false negative hides an unapproved change. Matched anywhere in the command, so
+# a mutation wrapped in ssh, sudo or a shell pipeline is still seen.
+MUTATING = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\bkubectl\b.{0,400}\b(delete|apply|create|patch|replace|edit|scale|cordon|uncordon|drain|taint|label)\b",
+        r"\bkubectl\b.{0,400}\b(annotate|set)\b",
+        r"\bkubectl\b.{0,400}\brollout\s+(restart|undo|pause|resume)\b",
+        r"\bhelm\b.{0,400}\b(install|upgrade|uninstall|rollback|delete)\b",
+        r"\bsystemctl\b.{0,200}\b(start|stop|restart|reload|enable|disable|kill|mask|unmask)\b",
+        r"\bservice\s+\S{1,100}\s+(start|stop|restart|reload)\b",
+        r"\bdocker\b.{0,200}\b(restart|stop|start|kill|rm|rmi|prune|run|exec)\b",
+        r"\b(docker\s+compose|docker-compose)\b.{0,200}\b(up|down|restart|stop|start|rm|pull)\b",
+        r"\b(crictl|ctr)\b.{0,200}\b(rm|rmp|rmi|stop|stopp|kill)\b",
+        r"\bterraform\b.{0,200}\b(apply|destroy|import|taint|untaint)\b|\bterraform\s+state\s+(rm|mv)\b",
+        r"\bansible(-playbook)?\b",
+        r"\b(reboot|shutdown|poweroff|halt)\b|\binit\s+[06]\b",
+        r"\b(rm|rmdir|mv|truncate|shred|dd|mkfs\S{0,20}|fsck\S{0,20}|mount|umount|chmod|chown|ln)\s",
+        r"\b(kill|pkill|killall)\b",
+        r"\bgit\b.{0,200}\b(push|reset|rebase|merge|revert)\b",
+        r"\b(apt|apt-get|dnf|yum|snap|pip|npm)\b.{0,200}\b(install|remove|purge|upgrade|refresh|uninstall)\b",
+        r"\b(iptables|nft)\b|\bip\s+(route|link|addr)\s+(add|del|delete|replace|flush|set)\b",
+        r"\bqm\s+(start|stop|shutdown|reset|reboot|destroy|set|migrate)\b",
+        r"\btee\b|\bsed\s+(-\S{0,8}i|--in-place)",
+    )
+)
+# The harness's own record-keeping changes the tracker and the audit branch; that is not a
+# system change. Only a segment that is itself one plain call of a harness script is exempt.
+HARNESS_SCRIPTS = frozenset(
+    {"incident.py", "timeline.py", "audit.py", "autonomy.py", "catalog_sync.py", "catalog_check.py", "validate_site.py"}
+)
+SCRIPTS_DIR = Path(__file__).resolve().parent
+SUBSTITUTION = re.compile(r"\$\(|`|<\(|>\(")
+MAX_CLASSIFY = 20000
+
+
+def _segments(command: str) -> list[list[str]] | None:
+    """Split a command into simple commands at unquoted shell operators. None if it cannot be parsed."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token and set(token) <= set(";&|<>()"):
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    return [segment for segment in segments if segment]
+
+
+def _is_harness_call(tokens: list[str]) -> bool:
+    """True only for a plain call of one of this plugin's own scripts.
+
+    Accepted forms: '<script> …', 'uv run <script> …', 'python3 <script> …'. No
+    option may sit between the launcher and the script: an option could name
+    other code to run. The script must be given as an absolute path to a file
+    in this plugin's scripts directory, not merely a path that ends the same way.
+    """
+    words = list(tokens)
+    if words[:2] == ["uv", "run"]:
+        words = words[2:]
+    elif words and re.fullmatch(r"python3?(\.\d+)?", words[0]):
+        words = words[1:]
+    if not words or words[0].startswith("-"):
+        return False
+    try:
+        given = Path(words[0]).expanduser()
+        # A relative path would be resolved against wherever verify happens to run, not
+        # where the command ran. Only an absolute path can be trusted to name our script.
+        if not given.is_absolute():
+            return False
+        script = given.resolve()
+    except (OSError, RuntimeError):
+        return False
+    return script.parent == SCRIPTS_DIR and script.name in HARNESS_SCRIPTS and script.is_file()
+
+
+def is_mutation(command: str) -> bool:
+    """Whether a shell command looks like it changes a system.
+
+    Fails closed: a command too long to classify, or one that cannot be parsed,
+    is treated by its whole text; substitution anywhere removes any exemption.
+    """
+    if not command.strip():
+        return False
+    if len(command) > MAX_CLASSIFY:
+        return True
+    segments = None if SUBSTITUTION.search(command) else _segments(command)
+    if segments is None:
+        return any(pattern.search(command) for pattern in MUTATING)
+    for tokens in segments:
+        if _is_harness_call(tokens):
+            continue
+        if any(pattern.search(" ".join(tokens)) for pattern in MUTATING):
+            return True
+    return False
+
+
+def unauthorised_mutations(entries: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Mutating shell commands that ran with no recorded approval for that exact command.
+
+    An approval authorises one run of its command, and must come before it. Tier 2
+    actions do not appear here: autonomy.py executes them itself and records them, so a
+    pre-approved command typed into a shell instead is, correctly, reported.
+    Commands are compared as recorded, that is, after redaction on both sides.
+    """
+    credit: dict[str, int] = {}
+    found = []
+    for _line, record in entries:
+        event = record.get("event")
+        if event == "approval" and record.get("command"):
+            credit[record["command"]] = credit.get(record["command"], 0) + 1
+            continue
+        if record.get("tool") == "Bash" and event == "attempt":
+            command = str((record.get("input") or {}).get("command", ""))
+        elif event == "command":
+            command = str(record.get("command", ""))
+        else:
+            continue
+        if not is_mutation(command):
+            continue
+        if credit.get(command, 0) > 0:
+            credit[command] -= 1
+        else:
+            found.append({"ts": record["ts"], "command": command, "capture": record.get("capture")})
+    return found
 
 
 HARNESS_SCRIPT = re.compile(r"scripts/(?:incident|timeline|audit|autonomy)\.py\b")
@@ -171,7 +311,7 @@ def cmd_record(args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, 
 
 def cmd_show(_args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, Any], _root: Path) -> int:
     summary = verify(read_log(state["id"]))
-    for key in ("attempts_without_completion", "state_dir_access"):
+    for key in ("attempts_without_completion", "state_dir_access", "unauthorised_mutations", "mutation_detection"):
         summary.pop(key)
     print(json.dumps({"path": str(audit_hook.spool_path(state["id"])), **summary}, indent=2))
     return 0
@@ -265,7 +405,8 @@ def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, A
                 "--title", f"audit: {incident_id}",
                 "--body", f"Audit log for incident {incident_id} ({state.get('url', '')}). "
                 f"{result['records']} records; hash chain intact; head {result['head']}; "
-                f"{len(result['attempts_without_completion'])} attempt(s) without completion.",
+                f"{len(result['attempts_without_completion'])} attempt(s) without completion; "
+                f"{len(result['unauthorised_mutations'])} mutation(s) with no approval or Tier 2 claim.",
             ]
         ).strip()  # fmt: skip
     release_capture(incident_id)

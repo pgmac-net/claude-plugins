@@ -110,6 +110,14 @@ _Avoid_: Priority, tier
 The rule class of an action the agent may take: Tier 0 read-only, Tier 1 mutation confirmed by a person, Tier 2 pre-approved runbook step.
 _Avoid_: Permission level, mode
 
+**Pre-approved action**:
+A mutation listed in a site's allow-list as an exact command template for one service, runnable without asking when its precondition holds.
+_Avoid_: Safe action, auto-fix, auto-remediation
+
+**Claim**:
+The recorded statement that a command matched a pre-approved action and that its precondition was observed.
+_Avoid_: Use, invocation
+
 **Mutation**:
 Any action that changes the state of a system.
 _Avoid_: Write, change, fix

@@ -9,6 +9,7 @@ one site.
 | `tiers.yaml` | Service tier definitions |
 | `catalog/` | Service catalog: generated Resources and hand-written services |
 | `patterns/` | Deployment pattern pages |
+| `autonomy.yaml` | Allow-list of pre-approved (Tier 2) actions. Empty by default |
 | `procedures/` | How incidents are worked here: monitoring access, evidence, comms, review format |
 | `audit/` | Per-incident audit logs |
 | `docs/adr/` | Site decisions |

@@ -95,6 +95,8 @@ incident:
     comms: [comms.md]
     review: [review.md]
   evidence_dir: ~/incident-evidence
+  # Allow-list of pre-approved (Tier 2) actions. Empty and switched off until you add to it.
+  autonomy_file: autonomy.yaml
   # Practice incidents are tracked here, never in a public repository.
   drill:
     repo: catalog

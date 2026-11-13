@@ -1,7 +1,7 @@
 ---
 name: start-incident
 description: This skill should be used when the user says "start an incident", "we have an incident", "incident on <host or service>", "something's down", "run an incident drill", reports a live production problem, or asks for a handover or summary of an incident in progress. Takes a free-text description of the problem and drives triage, diagnosis and gated recovery, keeping a typed timeline that the create-pir skill consumes once the incident is resolved.
-version: 0.4.0
+version: 0.5.0
 ---
 
 # Start Incident
@@ -22,7 +22,16 @@ State what you know and what you don't. "I don't know yet" beats a guessed root 
 | Tier | What | Rule |
 |---|---|---|
 | 0 | Read-only diagnostics | Run freely and immediately |
-| 1 | Any mutation: restart, delete, cordon, config write, anything a runbook lists under recovery | Stop. State the blast radius (`references/triage-stance.md`). Wait for a clear yes. Record the approval (`references/audit-log.md`). Then act |
+| 2 | A mutation the site has pre-approved, exactly as listed | Ask the script, not yourself (`references/autonomy.md`). If it says Tier 2 and you can show the precondition holds, the script runs it, without asking |
+| 1 | Every other mutation: restart, delete, cordon, config write, anything a runbook lists under recovery | Stop. State the blast radius (`references/triage-stance.md`). Wait for a clear yes. Record the approval (`references/audit-log.md`). Then act |
+
+**You never decide that something is Tier 2, and you never run a pre-approved command yourself.** Before any mutation, ask:
+
+```bash
+uv run <plugin root>/scripts/autonomy.py match --command "<the exact command>" --service component:<name>
+```
+
+`"tier": 1` means ask, whatever the reason given. Most sites list nothing, so most answers are Tier 1. `"tier": 2` means the site pre-approved it: check its precondition, then let the script run it (`references/autonomy.md`).
 
 A runbook's recovery step is still a mutation. A drill never mutates anything.
 
@@ -47,7 +56,7 @@ A runbook's recovery step is still a mutation. A drill never mutates anything.
 
 3. **Match a runbook.** Start from the runbooks listed on the affected services' catalog entries, then the runbooks directory. Update your checkout first if the site procedure says how; if you cannot, proceed with the local copy and say it may be stale. Record a match, or the absence of one, as a `decision` entry and in the body (`incident.py set --runbook …`). "No runbook covered this" is itself a finding for the review.
 
-4. **Diagnose and act.** Tier 0 freely; Tier 1 only after confirmation, with the approval recorded in the audit log before the command runs. Record every action **and its observed effect** as an `action` entry: what was changed, who approved it, what happened next. Record findings as `discovery`, choices between options as `decision`.
+4. **Diagnose and act.** Tier 0 freely. For any mutation, ask `autonomy.py match` first: a Tier 2 action is run by `autonomy.py run`, without asking; Tier 1 only after confirmation, with the approval recorded in the audit log before the command runs. Record every action **and its observed effect** as an `action` entry: what was changed, who approved it, what happened next. Record findings as `discovery`, choices between options as `decision`.
 
 5. **Verify recovery.** Confirm through the same source that first showed the problem. Capture after-the-fix evidence if the site procedures call for it. Then:
 
@@ -93,6 +102,7 @@ A hook records every tool call you make while the incident is open; you do not w
 
 - `references/triage-stance.md` — stabilise versus diagnose, sizing blast radius, when to stop and hand a decision to the person
 - `references/incident-record.md` — the tracking issue, entry types, handover and summary formats, script usage
+- `references/autonomy.md` — pre-approved actions: how the match works, what to do with each answer
 - `references/audit-log.md` — what the hook captures, recording approvals, verifying and committing the log
 - `references/catalog-in-an-incident.md` — using the catalog to find what is affected and what to read
 - `../site-check/references/site-config.md` — loading site configuration
