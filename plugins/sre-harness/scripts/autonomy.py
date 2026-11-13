@@ -33,6 +33,7 @@ or the allow-list could not be used.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import re
 import shutil
@@ -216,29 +217,37 @@ def cmd_run(args: argparse.Namespace, allow: dict[str, Any], incident_id: str | 
         raise SiteError("no current incident; a Tier 2 action is only available during one")
     if sre_common.read_incident_state(incident_id).get("drill"):
         raise SiteError("this incident is a drill; a drill never mutates anything. Use 'match' to exercise the path")
-    decision = decide(allow, args.command_text, args.service, incident_id)
-    if decision["tier"] == 2 and not args.precondition_evidence:
-        decision = tier1(
-            f"action '{decision['action']}' matches, but no --precondition-evidence was given. "
-            f"Its precondition: {decision['precondition']}"
-        )
+    env_values = redact.env_secrets()
+    recorded_command = redact.redact_text(args.command_text, env_values)
+    # One exclusive lock around count, check and claim, so two runs at once cannot both
+    # slip under the per-incident limit. Released before the command itself runs.
+    lock_path = audit_hook.spool_path(incident_id).with_suffix(".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        decision = decide(allow, args.command_text, args.service, incident_id)
+        if decision["tier"] == 2 and not args.precondition_evidence:
+            decision = tier1(
+                f"action '{decision['action']}' matches, but no --precondition-evidence was given. "
+                f"Its precondition: {decision['precondition']}"
+            )
+        program = shutil.which(args.command_text.split(" ")[0]) if decision["tier"] == 2 else None
+        if decision["tier"] == 2 and not program:
+            raise SiteError(f"'{args.command_text.split(' ')[0]}' is not on PATH; nothing was run")
+        if decision["tier"] == 2:
+            record(
+                incident_id,
+                "tier2",
+                action=decision["action"],
+                service=decision["service"],
+                command=recorded_command,
+                precondition_evidence=redact.redact_text(args.precondition_evidence, env_values),
+            )
     if decision["tier"] != 2:
         print(json.dumps(decision, indent=2))
         return NOT_RUN
 
     argv = args.command_text.split(" ")
-    program = shutil.which(argv[0])
-    if not program:
-        raise SiteError(f"'{argv[0]}' is not on PATH; nothing was run")
-    evidence = redact.redact_text(args.precondition_evidence, redact.env_secrets())
-    record(
-        incident_id,
-        "tier2",
-        action=decision["action"],
-        service=decision["service"],
-        command=args.command_text,
-        precondition_evidence=evidence,
-    )
     try:
         done = subprocess.run(  # noqa: S603 - argument list, no shell, matched against the allow-list
             [program, *argv[1:]], capture_output=True, text=True, check=False, timeout=args.timeout
@@ -246,7 +255,7 @@ def cmd_run(args: argparse.Namespace, allow: dict[str, Any], incident_id: str | 
         exit_code, stdout, stderr = done.returncode, done.stdout, done.stderr
     except subprocess.TimeoutExpired:
         exit_code, stdout, stderr = 124, "", f"timed out after {args.timeout}s\n"
-    record(incident_id, "tier2_result", action=decision["action"], command=args.command_text, exit_code=exit_code)
+    record(incident_id, "tier2_result", action=decision["action"], command=recorded_command, exit_code=exit_code)
     decision.update({"used": decision["used"] + 1, "ran": True, "exit_code": exit_code})
     print(json.dumps(decision, indent=2))
     sys.stdout.write(stdout)

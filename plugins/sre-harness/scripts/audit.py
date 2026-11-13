@@ -136,9 +136,10 @@ MUTATING = tuple(
 )
 # The harness's own record-keeping changes the tracker and the audit branch; that is not a
 # system change. Only a segment that is itself one plain call of a harness script is exempt.
-HARNESS_CALL = re.compile(
-    r"(?:\S*/)?scripts/(incident|timeline|audit|autonomy|catalog_sync|catalog_check|validate_site)\.py"
+HARNESS_SCRIPTS = frozenset(
+    {"incident.py", "timeline.py", "audit.py", "autonomy.py", "catalog_sync.py", "catalog_check.py", "validate_site.py"}
 )
+SCRIPTS_DIR = Path(__file__).resolve().parent
 SUBSTITUTION = re.compile(r"\$\(|`|<\(|>\(")
 MAX_CLASSIFY = 20000
 
@@ -161,13 +162,25 @@ def _segments(command: str) -> list[list[str]] | None:
 
 
 def _is_harness_call(tokens: list[str]) -> bool:
-    """True for 'scripts/x.py …', 'uv run scripts/x.py …' or 'python3 scripts/x.py …' and nothing else."""
+    """True only for a plain call of one of this plugin's own scripts.
+
+    Accepted forms: '<script> …', 'uv run <script> …', 'python3 <script> …'. No
+    option may sit between the launcher and the script: an option could name
+    other code to run. The script must be a file in this plugin's scripts
+    directory, not merely a path that ends the same way.
+    """
     words = list(tokens)
     if words[:2] == ["uv", "run"]:
-        words = [w for w in words[2:] if not w.startswith("-")] if len(words) > 2 else []
+        words = words[2:]
     elif words and re.fullmatch(r"python3?(\.\d+)?", words[0]):
         words = words[1:]
-    return bool(words) and bool(HARNESS_CALL.fullmatch(words[0]))
+    if not words or words[0].startswith("-"):
+        return False
+    try:
+        script = Path(words[0]).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return False
+    return script.parent == SCRIPTS_DIR and script.name in HARNESS_SCRIPTS and script.is_file()
 
 
 def is_mutation(command: str) -> bool:

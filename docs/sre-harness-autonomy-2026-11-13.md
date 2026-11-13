@@ -44,6 +44,14 @@ An automated security review of the first push raised three points, all valid.
 | Any command mentioning a harness script was exempt from mutation detection, so a mutation could be chained to one | Commands are split at unquoted shell operators and each simple command is classified; only a segment that is itself a harness call is exempt; substitution removes any exemption |
 | Classification looked only at the first 4,000 characters | Nothing is cut; a command too long to classify counts as a mutation |
 
+A second review of those fixes raised three more, also valid.
+
+| Finding | Change |
+|---|---|
+| The exemption accepted any `*/scripts/<name>.py` path, and any options after `uv run` | The script must resolve to a file in this plugin's own scripts directory, and no option may sit between the launcher and the script |
+| Two `run`s at once could both pass the per-incident limit | One exclusive lock covers count, check and claim |
+| The command was written unredacted into Tier 2 records | Redacted in both the claim and the result |
+
 ## Limits
 
 - The script decides the match; it cannot stop an agent running something
@@ -55,7 +63,8 @@ An automated security review of the first push raised three points, all valid.
 
 ## Verification
 
-- 253 tests pass; ruff clean; pylint 10.00/10.
+- 263 tests pass; ruff clean; pylint 10.00/10.
+- Eight concurrent `run`s of an action limited to two: exactly two execute.
 - Thirty-four near-matches of a listed command (extra flag, other namespace,
   `sudo`, chaining, substitution, redirection, quoting, tilde, globs, braces,
   escapes, extra whitespace, an environment prefix) are all Tier 1.

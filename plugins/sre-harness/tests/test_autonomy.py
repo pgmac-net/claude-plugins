@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 
 import audit
 import audit_hook
@@ -26,6 +29,7 @@ ACTION = {
     "max_per_incident": 2,
 }
 GOOD = "kubectl --context main delete pod shop-7f9c-x2k4 -n shop"
+SCRIPTS = audit.SCRIPTS_DIR
 
 
 def allow(**overrides) -> dict:
@@ -190,6 +194,30 @@ class TestRun:
         assert "no --precondition-evidence" in capfd.readouterr().out
         assert self.records() == []
 
+    def test_commands_are_redacted_in_tier_two_records(self, incident):
+        token = "abcdef0123456789abcd"
+        rule = {"value": {"pattern": "[a-z0-9]+"}}
+        action = {**ECHO, "id": "tok", "command": "echo --token={value}", "parameters": rule}
+        (incident / "autonomy.yaml").write_text(yaml.safe_dump(allow(actions=[action])), encoding="utf-8")
+        assert autonomy.main(["run", "--command", f"echo --token={token}", *EVIDENCE]) == 0
+        assert token not in json.dumps(self.records())
+        assert all("[REDACTED:" in r["command"] for r in self.records())
+
+    def test_concurrent_runs_cannot_exceed_the_limit(self, incident):
+        env = {
+            "SRE_HARNESS_SITE": str(incident),
+            "XDG_STATE_HOME": os.environ["XDG_STATE_HOME"],
+            "PATH": os.environ["PATH"],
+        }
+        command = [sys.executable, str(SCRIPTS / "autonomy.py"), "run", "--command", "echo restarted shop-1", *EVIDENCE]
+        procs = [
+            subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(8)
+        ]
+        codes = [proc.wait() for proc in procs]
+        assert sorted(codes) == [0, 0] + [autonomy.NOT_RUN] * 6
+        assert sum(1 for r in self.records() if r["event"] == "tier2") == 2
+        assert audit.verify(audit.read_log("catalog-5"))["chain_intact"] is True
+
     def test_the_commands_exit_code_is_returned_and_recorded(self):
         assert autonomy.main(["run", "--command", "false", *EVIDENCE]) == 1
         assert self.records()[-1] == {**self.records()[-1], "event": "tier2_result", "exit_code": 1}
@@ -252,8 +280,10 @@ class TestMutationDetection:
             "docker ps",
             "git log --oneline -5",
             "terraform plan",
-            "uv run /p/scripts/timeline.py add --type action --text 'deleted pod; rm of stale file'",
-            "uv run /p/scripts/incident.py set --phase Mitigating",
+            f"uv run {SCRIPTS}/timeline.py add --type action --text 'deleted pod; rm of stale file'",
+            f"uv run {SCRIPTS}/incident.py set --phase Mitigating",
+            f"{SCRIPTS}/audit.py show",
+            f"python3 {SCRIPTS}/timeline.py due",
         ],
     )
     def test_diagnostics_and_record_keeping_are_not(self, command):
@@ -262,16 +292,30 @@ class TestMutationDetection:
     @pytest.mark.parametrize(
         "command",
         [
-            "uv run /p/scripts/timeline.py add --type update --text ok; kubectl delete pod x -n shop",
-            "uv run /p/scripts/audit.py show && sudo systemctl restart kubelet",
-            "uv run /p/scripts/incident.py status | tee /etc/thing",
+            f"uv run {SCRIPTS}/timeline.py add --type update --text ok; kubectl delete pod x -n shop",
+            f"uv run {SCRIPTS}/audit.py show && sudo systemctl restart kubelet",
+            f"uv run {SCRIPTS}/incident.py status | tee /etc/thing",
             "echo scripts/audit.py; rm -rf /var/lib/thing",
             "true # scripts/audit.py\nkubectl delete ns shop",
-            'uv run /p/scripts/timeline.py add --text "$(kubectl delete pod x)"',
+            f'uv run {SCRIPTS}/timeline.py add --text "$(kubectl delete pod x)"',
             "cat /p/scripts/audit.py > /dev/null; reboot",
         ],
     )
     def test_a_harness_call_does_not_excuse_what_is_chained_to_it(self, command):
+        assert audit.is_mutation(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"uv run --with evil-package {SCRIPTS}/audit.py record --kind note --text 'rm -rf x'",
+            f"uv run --script /tmp/evil.py {SCRIPTS}/audit.py record --kind note --text 'rm -rf x'",
+            "uv run /tmp/elsewhere/scripts/audit.py record --kind note --text 'kubectl delete ns shop'",
+            "/tmp/scripts/timeline.py add --text 'sudo reboot'",
+            f"uv run {SCRIPTS}/not_a_harness_script.py --do 'rm -rf x'",
+            f"uv run {SCRIPTS}/redact.py --do 'rm -rf x'",
+        ],
+    )
+    def test_only_a_plain_call_of_this_plugins_own_script_is_exempt(self, command):
         assert audit.is_mutation(command)
 
     def test_a_command_too_long_to_classify_counts_as_a_mutation(self):
