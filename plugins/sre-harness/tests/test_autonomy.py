@@ -203,6 +203,19 @@ class TestRun:
         assert token not in json.dumps(self.records())
         assert all("[REDACTED:" in r["command"] for r in self.records())
 
+    def test_site_named_credential_variables_are_redacted_in_tier_two_records(self, incident, monkeypatch):
+        monkeypatch.setenv("SHOPDB", "plainvalue12345")
+        state = sre_common.read_incident_state("catalog-5")
+        sre_common.write_incident_state({**state, "redact_env": ["SHOPDB"]})
+        rule = {"value": {"pattern": "[a-z0-9]+"}}
+        action = {**ECHO, "id": "cred", "command": "echo {value}", "parameters": rule}
+        (incident / "autonomy.yaml").write_text(yaml.safe_dump(allow(actions=[action])), encoding="utf-8")
+        evidence = ["--precondition-evidence", "saw plainvalue12345 in the config"]
+        assert autonomy.main(["run", "--command", "echo plainvalue12345", *evidence]) == 0
+        assert "plainvalue12345" not in json.dumps(self.records())
+        assert "[REDACTED:env SHOPDB]" in self.records()[0]["command"]
+        assert "[REDACTED:env SHOPDB]" in self.records()[0]["precondition_evidence"]
+
     def test_concurrent_runs_cannot_exceed_the_limit(self, incident):
         env = {
             "SRE_HARNESS_SITE": str(incident),
@@ -314,6 +327,10 @@ class TestMutationDetection:
             "/tmp/scripts/timeline.py add --text 'sudo reboot'",
             f"uv run {SCRIPTS}/not_a_harness_script.py --do 'rm -rf x'",
             f"uv run {SCRIPTS}/redact.py --do 'rm -rf x'",
+            "uv run scripts/audit.py record --kind note --text 'rm -rf x'",
+            "scripts/timeline.py add --text 'sudo reboot'",
+            "cd /tmp/evil && uv run scripts/audit.py record --kind note --text 'kubectl delete ns shop'",
+            "uv run ./scripts/../scripts/audit.py record --kind note --text 'rm -rf x'",
         ],
     )
     def test_only_a_plain_call_of_this_plugins_own_script_is_exempt(self, command):

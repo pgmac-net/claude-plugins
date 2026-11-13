@@ -217,7 +217,8 @@ def cmd_run(args: argparse.Namespace, allow: dict[str, Any], incident_id: str | 
         raise SiteError("no current incident; a Tier 2 action is only available during one")
     if sre_common.read_incident_state(incident_id).get("drill"):
         raise SiteError("this incident is a drill; a drill never mutates anything. Use 'match' to exercise the path")
-    env_values = redact.env_secrets()
+    # Same sources as the hook: variables whose names say they are secrets, plus those the site names.
+    env_values = redact.env_secrets(extra_names=audit_hook.credential_names(incident_id))
     recorded_command = redact.redact_text(args.command_text, env_values)
     # One exclusive lock around count, check and claim, so two runs at once cannot both
     # slip under the per-incident limit. Released before the command itself runs.

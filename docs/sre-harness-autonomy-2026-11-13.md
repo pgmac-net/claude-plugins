@@ -51,6 +51,8 @@ A second review of those fixes raised three more, also valid.
 | The exemption accepted any `*/scripts/<name>.py` path, and any options after `uv run` | The script must resolve to a file in this plugin's own scripts directory, and no option may sit between the launcher and the script |
 | Two `run`s at once could both pass the per-incident limit | One exclusive lock covers count, check and claim |
 | The command was written unredacted into Tier 2 records | Redacted in both the claim and the result |
+| (third review) A relative script path was resolved against the verifier's directory | Only an absolute path into this plugin's scripts directory is exempt |
+| (third review) Tier 2 records skipped the credential variables the site names | They use the same redaction sources as the hook |
 
 ## Limits
 
@@ -63,7 +65,7 @@ A second review of those fixes raised three more, also valid.
 
 ## Verification
 
-- 263 tests pass; ruff clean; pylint 10.00/10.
+- 268 tests pass; ruff clean; pylint 10.00/10.
 - Eight concurrent `run`s of an action limited to two: exactly two execute.
 - Thirty-four near-matches of a listed command (extra flag, other namespace,
   `sudo`, chaining, substitution, redirection, quoting, tilde, globs, braces,

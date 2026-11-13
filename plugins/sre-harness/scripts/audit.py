@@ -166,8 +166,8 @@ def _is_harness_call(tokens: list[str]) -> bool:
 
     Accepted forms: '<script> …', 'uv run <script> …', 'python3 <script> …'. No
     option may sit between the launcher and the script: an option could name
-    other code to run. The script must be a file in this plugin's scripts
-    directory, not merely a path that ends the same way.
+    other code to run. The script must be given as an absolute path to a file
+    in this plugin's scripts directory, not merely a path that ends the same way.
     """
     words = list(tokens)
     if words[:2] == ["uv", "run"]:
@@ -177,7 +177,12 @@ def _is_harness_call(tokens: list[str]) -> bool:
     if not words or words[0].startswith("-"):
         return False
     try:
-        script = Path(words[0]).expanduser().resolve()
+        given = Path(words[0]).expanduser()
+        # A relative path would be resolved against wherever verify happens to run, not
+        # where the command ran. Only an absolute path can be trusted to name our script.
+        if not given.is_absolute():
+            return False
+        script = given.resolve()
     except (OSError, RuntimeError):
         return False
     return script.parent == SCRIPTS_DIR and script.name in HARNESS_SCRIPTS and script.is_file()
