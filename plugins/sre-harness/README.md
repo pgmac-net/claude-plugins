@@ -2,7 +2,7 @@
 
 A portable harness for doing SRE work with an LLM agent: service catalog, incident triage and remediation, audit, user journeys and SLOs.
 
-So far it has three parts: how a site is described and checked, a service catalog kept in step with the site's own repositories, and incident skills that keep a typed timeline. Audit capture, autonomy tiers and SLO skills arrive in later releases.
+So far it has: how a site is described and checked, a service catalog kept in step with the site's own repositories, incident skills that keep a typed timeline, and a hook-captured audit log. Autonomy tiers and SLO skills arrive in later releases.
 
 ## How it is put together
 
@@ -77,6 +77,16 @@ uv run scripts/incident.py close      # resolved; the issue stays open for a per
 
 Timeline entry types: `discovery`, `action`, `decision`, `milestone`, `update`, `handover`, `summary`. Each is one comment with a hidden marker line and a line people read. Comments typed by a person are kept as notes. A marker is honoured only from the tracker repository's owner, members and collaborators, or a login listed under `incident.responders`; from anyone else it is kept as a flagged note, so a stranger commenting on a public tracker cannot forge an entry or its time.
 
+**Audit log.** While an incident is open, a hook records every tool call the session attempts and completes: inputs redacted, output as size and SHA-256 only, each line chained to the one before. It records nothing outside an incident and never blocks a tool call. Approvals are added explicitly; agents without hooks self-report, and are marked so.
+
+```bash
+uv run scripts/audit.py record --kind approval --text "<blast radius>" --command "<command>" --approver "<who>"
+uv run scripts/audit.py verify     # chain intact? attempts that never completed?
+uv run scripts/audit.py commit     # to the site's private audit location, on a branch, as a pull request
+```
+
+The log is spooled under `~/.local/state/sre-harness/` during the incident and committed at the end. Limits: the hook fails open; redaction is pattern-based; the chain alone cannot show a change to the last line, so the head hash goes in the commit message.
+
 **Site procedures.** The skills say *when*; the site says *how*. `site.yaml` lists procedure files per stage (`triage`, `evidence`, `comms`, `review`) under `incident.procedures`, and the skills read them at that stage. This is where monitoring access, fallbacks, evidence capture and review format live. See [ADR 0010](docs/adr/0010-site-procedures-carry-the-how.md).
 
 **Drills.** `--drill` tracks a practice incident in the private repository named by `incident.drill`, so nothing fake is published. A drill never mutates anything.
@@ -98,6 +108,9 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 | `scripts/catalog_check.py` | Entity validation and drift report |
 | `scripts/incident.py` | Opens, updates and resolves the tracking issue |
 | `scripts/timeline.py` | Writes, reads and exports timeline entries; says when a status update is due |
+| `hooks/hooks.json`, `scripts/audit_hook.py` | The audit hook: captures tool calls during an incident |
+| `scripts/audit.py` | Explicit audit records, verification, commit to the audit location |
+| `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
 | `templates/site-repo/` | Starter layout for a new site repository |
 | `docs/adr/` | Design decisions |

@@ -1,7 +1,7 @@
 ---
 name: create-pir
 description: This skill should be used when the user says "create a PIR", "write a post-incident review", "generate an incident report", "document this incident", "write a post-mortem", "capture this incident", or asks for formal incident documentation once an incident is resolved. Writes the review from the incident's timeline, applies Infinite How's root cause analysis, evaluates runbooks, files action items and raises a pull request.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # Create a post-incident review (PIR)
@@ -29,7 +29,7 @@ Turn a resolved incident into a review document, end to end: analysis, runbooks,
 
 With no tracking issue, extract from the conversation alone and say so in the document.
 
-## The ten steps
+## The steps
 
 1. **Extract** metadata (dates, duration, severity, resolution, impact, affected services), the timeline, one to four root-cause chains, and action items. Collect evidence gathered during the incident; if the site's `evidence` procedures can still produce something that proves cause or recovery, produce it now, before it expires.
 2. **Root-cause** each chain with Infinite How's: `references/infinite-hows.md`.
@@ -41,6 +41,7 @@ With no tracking issue, extract from the conversation alone and say so in the do
 8. **Back-fill** the issue links into the document, and update the site's index of reviews if it has one.
 9. **Ship**: validate as the site procedure says, then branch, commit, push, pull request. Never commit to the default branch.
 10. **Link back**: comment on the tracking issue with the review, the pull request and every action item. Leave the issue open; closing it is a person's decision.
+11. **Commit the audit log**: `uv run <plugin root>/scripts/audit.py verify`, put its findings in the review (records, self-reported count, attempts that never completed, capture errors), then `audit.py commit`. Detail: `../start-incident/references/audit-log.md`.
 
 Detail for every step, and the closing checklist: `references/pir-workflow.md`.
 
