@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -223,11 +224,15 @@ class TestRun:
             "PATH": os.environ["PATH"],
         }
         command = [sys.executable, str(SCRIPTS / "autonomy.py"), "run", "--command", "echo restarted shop-1", *EVIDENCE]
-        # Started together on purpose: the point is that they overlap.
-        procs = [  # pylint: disable=consider-using-with
-            subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(8)
-        ]
-        codes = [proc.wait() for proc in procs]
+        # All eight are started before any is waited on: the point is that they overlap.
+        with contextlib.ExitStack() as stack:
+            procs = [
+                stack.enter_context(
+                    subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                )
+                for _ in range(8)
+            ]
+            codes = [proc.wait() for proc in procs]
         assert sorted(codes) == [0, 0] + [autonomy.NOT_RUN] * 6
         assert sum(1 for r in self.records() if r["event"] == "tier2") == 2
         assert audit.verify(audit.read_log("catalog-5"))["chain_intact"] is True
