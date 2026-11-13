@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import autonomy
 import catalog_check
 from redact import secret_label
 from sre_common import SITE_ENV, SITE_FILE, Report, SiteError, load_yaml, print_findings, resolve_site, schema_errors
@@ -169,6 +171,55 @@ def check_incident(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dic
     return errors, summary
 
 
+def _action_problems(action: dict[str, Any], known: set[str]) -> list[str]:
+    """What is wrong with one pre-approved action."""
+    problems = []
+    if action["service"] not in known:
+        problems.append(f"service {action['service']} is not in the catalog")
+    if autonomy.SHELL_OPERATORS.search(action["command"]):
+        problems.append("command uses shell operators or substitution; only one simple command is allowed")
+    used = set(autonomy.PLACEHOLDER.findall(action["command"]))
+    rules = action.get("parameters", {})
+    problems += [f"placeholder {{{name}}} has no rule under parameters" for name in sorted(used - set(rules))]
+    problems += [f"parameter '{name}' is not used in the command" for name in sorted(set(rules) - used)]
+    for name, rule in rules.items():
+        try:
+            re.compile(rule.get("pattern", ""))
+        except re.error:
+            problems.append(f"parameter '{name}' has a pattern that is not a valid regular expression")
+    return problems
+
+
+def check_autonomy(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
+    """The allow-list of pre-approved actions must be well-formed and refer to real services."""
+    name = doc.get("incident", {}).get("autonomy_file")
+    if not name or not (site_root / name).is_file():
+        return [], {}
+    allow = load_yaml(site_root / name)
+    errors = [f"{name}: {msg}" for msg in schema_errors(allow, "autonomy.schema.json")]
+    if errors:
+        return errors, {}
+
+    known = set()
+    catalog_dir = site_root / doc["catalog"]["path"]
+    if catalog_dir.is_dir():
+        known = {entity.ref for entity in catalog_check.load_entities(catalog_dir, catalog_check.CatalogReport())}
+    for ref in allow.get("disabled_services", []):
+        if ref not in known:
+            errors.append(f"{name}: disabled_services names {ref}, which is not in the catalog")
+    for action_id, count in Counter(action["id"] for action in allow["actions"]).items():
+        if count > 1:
+            errors.append(f"{name}: action id '{action_id}' is used {count} times")
+    for action in allow["actions"]:
+        errors.extend(f"{name}: action '{action['id']}': {msg}" for msg in _action_problems(action, known))
+    enabled = [a["id"] for a in allow["actions"] if a.get("enabled", True)]
+    return errors, {
+        "tier2_enabled": allow["tier2_enabled"],
+        "actions": len(allow["actions"]),
+        "enabled_actions": len(enabled),
+    }
+
+
 def check_tiers(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any], dict[str, Any] | None]:
     """Validate the tier definitions file named by site.yaml. Returns errors, summary and the document."""
     tiers_file = doc.get("tiers_file")
@@ -207,6 +258,9 @@ def validate(site_root: Path) -> Report:
     report.errors.extend(tier_errors)
     incident_errors, incident_summary = check_incident(site_root, doc)
     report.errors.extend(f"{SITE_FILE}: {msg}" for msg in incident_errors)
+    autonomy_errors, autonomy_summary = ([], {}) if path_errors else check_autonomy(site_root, doc)
+    report.errors.extend(autonomy_errors)
+    incident_summary["autonomy"] = autonomy_summary or None
 
     catalog_summary: dict[str, Any] = {}
     if not path_errors and not tier_errors:

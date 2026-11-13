@@ -20,7 +20,7 @@ Each timeline entry you post also pins the log's current head hash and record co
 
 ## What you must add
 
-The hook proves a command ran. It cannot know why it was allowed. Before every Tier 1 mutation, once the person has said yes, record the approval:
+The hook proves a command ran. It cannot know why it was allowed. A Tier 2 claim records itself (`autonomy.md`). Before every Tier 1 mutation, once the person has said yes, record the approval, giving `--command` exactly as you will run it so the two can be paired:
 
 ```bash
 uv run <plugin root>/scripts/audit.py record --kind approval \
@@ -28,7 +28,7 @@ uv run <plugin root>/scripts/audit.py record --kind approval \
   --command "<the exact command>" --approver "<who said yes>"
 ```
 
-Record a refusal the same way with `--kind denial`. Then run the command, and write the `action` timeline entry once you have seen its effect.
+Record a refusal the same way with `--kind denial`. An approval record is your statement that the person agreed; it is not proof that they did. Record only what was actually said. Then run the command, and write the `action` timeline entry once you have seen its effect.
 
 **If your agent has no hooks**, nothing is captured automatically. Record each command yourself, immediately after running it, with `--kind command --command "<exact command>" --text "<outcome>"`. These are marked `self-reported`: a weaker record, and the review will say so.
 
@@ -39,6 +39,7 @@ uv run <plugin root>/scripts/audit.py show      # where it is, how many records
 uv run <plugin root>/scripts/audit.py verify --check-anchors
 #   chain intact? matches the hashes pinned in the timeline? attempts that never completed?
 #   anything that touched the state directory? anything secret-shaped left after redaction?
+#   any mutating command with neither an approval nor a Tier 2 claim?
 ```
 
 ## Closing

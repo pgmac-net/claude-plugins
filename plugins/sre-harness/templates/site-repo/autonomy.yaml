@@ -1,0 +1,26 @@
+# Pre-approved (Tier 2) actions: mutations an agent may run during an incident
+# without asking. Nothing is Tier 2 unless it is listed here, and this file is
+# changed only by reviewed pull request.
+#
+# A command is Tier 2 only if it matches a template exactly, token for token,
+# with every {placeholder} satisfying its rule. Anything else is Tier 1.
+schema_version: 1
+
+# Site-wide switch. While false, every action is Tier 1.
+tier2_enabled: false
+
+# Services whose actions are suspended, for example while an error budget is spent.
+disabled_services: []
+
+actions: []
+#  - id: restart-example-pod
+#    service: component:example-service
+#    runbook: example-stuck.md
+#    step: Recovery, step 2
+#    command: kubectl --context {cluster} delete pod {pod} -n {namespace}
+#    parameters:
+#      cluster: {values: [main]}
+#      namespace: {values: [example]}
+#      pod: {pattern: "example-[a-z0-9]+-[a-z0-9]+"}
+#    precondition: The pod is in CrashLoopBackOff and its volume is healthy.
+#    max_per_incident: 2
