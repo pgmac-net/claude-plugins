@@ -210,7 +210,8 @@ class TestRun:
             "PATH": os.environ["PATH"],
         }
         command = [sys.executable, str(SCRIPTS / "autonomy.py"), "run", "--command", "echo restarted shop-1", *EVIDENCE]
-        procs = [
+        # Started together on purpose: the point is that they overlap.
+        procs = [  # pylint: disable=consider-using-with
             subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(8)
         ]
         codes = [proc.wait() for proc in procs]
