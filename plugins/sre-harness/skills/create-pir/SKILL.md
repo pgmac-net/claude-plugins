@@ -41,7 +41,7 @@ With no tracking issue, extract from the conversation alone and say so in the do
 8. **Back-fill** the issue links into the document, and update the site's index of reviews if it has one.
 9. **Ship**: validate as the site procedure says, then branch, commit, push, pull request. Never commit to the default branch.
 10. **Link back**: comment on the tracking issue with the review, the pull request and every action item. Leave the issue open; closing it is a person's decision.
-11. **Commit the audit log**: `uv run <plugin root>/scripts/audit.py verify`, put its findings in the review (records, self-reported count, approvals and Tier 2 claims, attempts that never completed, mutations with no authority, capture errors), then `audit.py commit`. Detail: `../start-incident/references/audit-log.md`.
+11. **Commit the audit log**: `uv run <plugin root>/scripts/audit.py verify`, put its findings in the review (records, self-reported count, approvals, Tier 2 actions run, attempts that never completed, mutations with no approval, capture errors), then `audit.py commit`. Detail: `../start-incident/references/audit-log.md`.
 
 Detail for every step, and the closing checklist: `references/pir-workflow.md`.
 

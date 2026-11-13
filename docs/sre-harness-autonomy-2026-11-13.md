@@ -10,10 +10,11 @@ Ticket: pgmac-net/homelabia#236. Builds on the incident skills and the audit log
   service, an exact command template, a rule for each `{placeholder}` (fixed
   values or a whole-value pattern), a precondition in words, a per-incident
   limit, and switches (site-wide, per action, per service).
-- **`scripts/autonomy.py`** — `match` (which tier is this command?), `claim`
-  (match, require evidence of the precondition, record it), `list`.
-- **`audit.py verify`** — now reports every mutating command that ran with
-  neither an approval record nor a Tier 2 claim for that exact command.
+- **`scripts/autonomy.py`** — `match` (which tier is this command?), `run`
+  (match, require evidence of the precondition, record the claim, execute the
+  command as an argument list with no shell, record the exit code), `list`.
+- **`audit.py verify`** — now reports every mutating shell command that ran
+  with no approval record for that exact command.
 - **`validate_site.py`** — checks the allow-list: services exist in the
   catalog, placeholders and rules agree, no shell operators in a template.
 - Skills: the agent asks the script before any mutation and never decides
@@ -22,15 +23,26 @@ Ticket: pgmac-net/homelabia#236. Builds on the incident skills and the audit log
 ## How a match is decided
 
 1. The site-wide switch is on.
-2. The command is one simple command: no `;`, `&&`, `|`, redirection,
-   substitution, variable or newline.
+2. The command uses only letters, digits, `. _ : / = @ , + -` and single
+   spaces. No quoting, operators, or anything a shell would expand.
 3. It has the same number of tokens as a template, and each token equals the
    template's, with placeholders taking a value.
 4. Every placeholder value passes its rule.
 5. The action is enabled, its service is not suspended, and its limit for
    this incident is not reached.
 
-Anything else is Tier 1, with the reason.
+Anything else is Tier 1, with the reason. A Tier 2 command is then executed
+by the script itself, without a shell. `run` refuses during a drill.
+
+## Found in review
+
+An automated security review of the first push raised three points, all valid.
+
+| Finding | Change |
+|---|---|
+| The matcher tokenised with `shlex`, then the agent passed the string to bash, which reads `~`, globs, braces and escapes differently | Commands and templates are confined to a safe character set, and the harness executes the matched argument list itself with no shell |
+| Any command mentioning a harness script was exempt from mutation detection, so a mutation could be chained to one | Commands are split at unquoted shell operators and each simple command is classified; only a segment that is itself a harness call is exempt; substitution removes any exemption |
+| Classification looked only at the first 4,000 characters | Nothing is cut; a command too long to classify counts as a mutation |
 
 ## Limits
 
@@ -43,7 +55,9 @@ Anything else is Tier 1, with the reason.
 
 ## Verification
 
-- 221 tests pass; ruff clean; pylint 10.00/10.
-- Twenty near-matches of a listed command (extra flag, other namespace,
-  `sudo`, chaining, substitution, redirection, quoting tricks) are all Tier 1.
+- 253 tests pass; ruff clean; pylint 10.00/10.
+- Thirty-four near-matches of a listed command (extra flag, other namespace,
+  `sudo`, chaining, substitution, redirection, quoting, tilde, globs, braces,
+  escapes, extra whitespace, an environment prefix) are all Tier 1.
+- `run` executes through an argument list: a chained `touch` never happens.
 - The per-incident limit is enforced from the audit log.

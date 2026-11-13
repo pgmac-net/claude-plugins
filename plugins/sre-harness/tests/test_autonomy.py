@@ -78,8 +78,28 @@ def test_anything_but_the_exact_command_is_tier_one(command):
     assert result["reason"]
 
 
-def test_quoting_that_yields_the_same_tokens_still_matches():
-    assert decide("kubectl --context 'main' delete pod \"shop-7f9c-x2k4\" -n shop")["tier"] == 2
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kubectl --context 'main' delete pod shop-7f9c-x2k4 -n shop",
+        'kubectl --context main delete pod "shop-7f9c-x2k4" -n shop',
+        "kubectl --context main delete pod shop-7f9c-x2k4 -n ~shop",
+        "kubectl --context main delete pod shop-* -n shop",
+        "kubectl --context main delete pod shop-{7f9c-x2k4,db-0} -n shop",
+        "kubectl --context main delete pod shop-7f9c-x2k4 -n sh\\op",
+        "kubectl --context main delete pod shop-7f9c-x2k4 -n shop #",
+        "kubectl --context main delete pod shop-7f9c-x2k4 -n shop !!",
+        "kubectl --context main delete pod shop-7f9c-x2k? -n shop",
+        "kubectl --context main delete pod shop-[7]f9c-x2k4 -n shop",
+        "kubectl  --context main delete pod shop-7f9c-x2k4 -n shop",
+        "kubectl --context main delete pod shop-7f9c-x2k4 -n shop ",
+        "kubectl\t--context main delete pod shop-7f9c-x2k4 -n shop",
+        "KUBECONFIG=/tmp/evil kubectl --context main delete pod shop-7f9c-x2k4 -n shop",
+    ],
+)
+def test_anything_a_shell_would_read_differently_is_tier_one(command):
+    """What is matched must be exactly what runs, so quoting and expansion characters are refused outright."""
+    assert decide(command)["tier"] == 1
 
 
 def test_switches_turn_tier_two_off():
@@ -127,37 +147,78 @@ def incident(monkeypatch, tmp_path, site):
     return site
 
 
+ECHO = {
+    "id": "say",
+    "service": "component:example-service",
+    "command": "echo restarted {name}",
+    "parameters": {"name": {"pattern": "[a-z0-9-]+"}},
+    "precondition": "It is safe to say so.",
+    "max_per_incident": 2,
+}
+EVIDENCE = ["--precondition-evidence", "observed CrashLoopBackOff; volume Ready"]
+
+
 @pytest.mark.usefixtures("incident")
-class TestClaim:
-    def claim(self, capsys, *extra: str) -> dict:
-        assert autonomy.main(["claim", "--command", GOOD, *extra]) == 0
-        return json.loads(capsys.readouterr().out)
+class TestRun:
+    @pytest.fixture(autouse=True)
+    def _allow(self, incident):
+        actions = [dict(ECHO), {**ECHO, "id": "fail", "command": "false", "parameters": {}}]
+        (incident / "autonomy.yaml").write_text(yaml.safe_dump(allow(actions=actions)), encoding="utf-8")
 
-    def test_claim_needs_evidence_of_the_precondition(self, capsys):
-        result = self.claim(capsys)
-        assert result["tier"] == 1 and "no --precondition-evidence" in result["reason"]
-        assert not audit_hook.spool_path("catalog-5").exists()
+    def records(self) -> list[dict]:
+        path = audit_hook.spool_path("catalog-5")
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
-    def test_claim_records_and_enforces_the_limit(self, capsys):
-        evidence = ["--precondition-evidence", "kubectl get pod showed CrashLoopBackOff; volume Ready"]
-        assert self.claim(capsys, *evidence)["used"] == 1
-        assert self.claim(capsys, *evidence)["used"] == 2
-        third = self.claim(capsys, *evidence)
-        assert third["tier"] == 1 and "reached its limit of 2" in third["reason"]
-        records = [json.loads(line) for line in audit_hook.spool_path("catalog-5").read_text().splitlines()]
-        assert [(r["event"], r["action"], r["command"]) for r in records] == [("tier2", "restart-shop-pod", GOOD)] * 2
+    def test_run_executes_the_matched_argv_and_records_claim_and_result(self, capfd):
+        assert autonomy.main(["run", "--command", "echo restarted shop-1", *EVIDENCE]) == 0
+        out = capfd.readouterr().out
+        assert '"ran": true' in out and out.rstrip().endswith("restarted shop-1")
+        assert [(r["event"], r.get("exit_code")) for r in self.records()] == [("tier2", None), ("tier2_result", 0)]
+        assert self.records()[0]["command"] == "echo restarted shop-1"
+        assert self.records()[0]["precondition_evidence"].startswith("observed CrashLoopBackOff")
 
-    def test_match_changes_nothing(self, capsys):
-        assert autonomy.main(["match", "--command", GOOD]) == 0
-        assert json.loads(capsys.readouterr().out)["tier"] == 2
-        assert not audit_hook.spool_path("catalog-5").exists()
+    def test_no_shell_is_involved(self, capfd, tmp_path):
+        """Even if an unsafe string reached run, it is refused before execution; nothing is created."""
+        target = tmp_path / "made-by-shell"
+        assert autonomy.main(["run", "--command", f"echo restarted x; touch {target}", *EVIDENCE]) == autonomy.NOT_RUN
+        assert not target.exists()
+        assert self.records() == []
+        assert '"tier": 1' in capfd.readouterr().out
 
-    def test_site_without_an_allow_list_is_all_tier_one(self, incident, capsys):
+    def test_run_needs_evidence_of_the_precondition(self, capfd):
+        assert autonomy.main(["run", "--command", "echo restarted shop-1"]) == autonomy.NOT_RUN
+        assert "no --precondition-evidence" in capfd.readouterr().out
+        assert self.records() == []
+
+    def test_the_commands_exit_code_is_returned_and_recorded(self):
+        assert autonomy.main(["run", "--command", "false", *EVIDENCE]) == 1
+        assert self.records()[-1] == {**self.records()[-1], "event": "tier2_result", "exit_code": 1}
+
+    def test_the_limit_is_enforced_from_the_audit_log(self, capfd):
+        for _ in range(2):
+            assert autonomy.main(["run", "--command", "echo restarted shop-1", *EVIDENCE]) == 0
+        assert autonomy.main(["run", "--command", "echo restarted shop-1", *EVIDENCE]) == autonomy.NOT_RUN
+        assert "reached its limit of 2" in capfd.readouterr().out
+        assert sum(1 for r in self.records() if r["event"] == "tier2") == 2
+
+    def test_a_drill_never_runs_anything(self, capfd):
+        state = sre_common.read_incident_state("catalog-5")
+        sre_common.write_incident_state({**state, "drill": True})
+        assert autonomy.main(["run", "--command", "echo restarted shop-1", *EVIDENCE]) == 2
+        assert "a drill never mutates anything" in capfd.readouterr().err
+        assert self.records() == []
+
+    def test_match_changes_nothing(self, capfd):
+        assert autonomy.main(["match", "--command", "echo restarted shop-1"]) == 0
+        assert json.loads(capfd.readouterr().out)["tier"] == 2
+        assert self.records() == []
+
+    def test_site_without_an_allow_list_is_all_tier_one(self, incident, capfd):
         doc = yaml.safe_load((incident / "site.yaml").read_text())
         del doc["incident"]["autonomy_file"]
         (incident / "site.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
-        assert autonomy.main(["match", "--command", GOOD]) == 0
-        assert json.loads(capsys.readouterr().out)["tier"] == 1
+        assert autonomy.main(["match", "--command", "echo restarted shop-1"]) == 0
+        assert json.loads(capfd.readouterr().out)["tier"] == 1
 
 
 class TestMutationDetection:
@@ -198,6 +259,33 @@ class TestMutationDetection:
     def test_diagnostics_and_record_keeping_are_not(self, command):
         assert not audit.is_mutation(command)
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "uv run /p/scripts/timeline.py add --type update --text ok; kubectl delete pod x -n shop",
+            "uv run /p/scripts/audit.py show && sudo systemctl restart kubelet",
+            "uv run /p/scripts/incident.py status | tee /etc/thing",
+            "echo scripts/audit.py; rm -rf /var/lib/thing",
+            "true # scripts/audit.py\nkubectl delete ns shop",
+            'uv run /p/scripts/timeline.py add --text "$(kubectl delete pod x)"',
+            "cat /p/scripts/audit.py > /dev/null; reboot",
+        ],
+    )
+    def test_a_harness_call_does_not_excuse_what_is_chained_to_it(self, command):
+        assert audit.is_mutation(command)
+
+    def test_a_command_too_long_to_classify_counts_as_a_mutation(self):
+        padded = "echo " + "a" * (audit.MAX_CLASSIFY + 10) + "; kubectl delete ns shop"
+        assert audit.is_mutation(padded)
+        assert audit.is_mutation("echo " + "a" * (audit.MAX_CLASSIFY + 10))
+
+    def test_a_mutation_at_the_end_of_a_long_command_is_seen(self):
+        assert audit.is_mutation("echo " + "a " * 5000 + "; kubectl delete ns shop")
+
+    def test_unparseable_command_is_classified_by_its_text(self):
+        assert audit.is_mutation("kubectl delete pod 'unterminated")
+        assert not audit.is_mutation("kubectl get pod 'unterminated")
+
     def entries(self, *records: dict) -> list[tuple[str, dict]]:
         return [(json.dumps(r), {"ts": "2026-01-02T03:04:05Z", **r}) for r in records]
 
@@ -208,11 +296,9 @@ class TestMutationDetection:
         found = audit.unauthorised_mutations(self.entries(self.attempt("kubectl get pods"), self.attempt(GOOD)))
         assert [item["command"] for item in found] == [GOOD]
 
-    def test_approval_or_claim_authorises_exactly_one_run_and_must_come_first(self):
+    def test_approval_authorises_exactly_one_run_and_must_come_first(self):
         approval = {"event": "approval", "command": GOOD, "capture": "self-reported"}
-        claim = {"event": "tier2", "command": GOOD, "action": "restart-shop-pod"}
         assert audit.unauthorised_mutations(self.entries(approval, self.attempt(GOOD))) == []
-        assert audit.unauthorised_mutations(self.entries(claim, self.attempt(GOOD))) == []
         assert len(audit.unauthorised_mutations(self.entries(approval, self.attempt(GOOD), self.attempt(GOOD)))) == 1
         assert len(audit.unauthorised_mutations(self.entries(self.attempt(GOOD), approval))) == 1
 
@@ -243,9 +329,10 @@ class TestAllowListValidation:
         bad = allow(actions=[{**ACTION, "service": "component:nope"}])
         assert any("service component:nope is not in the catalog" in err for err in self.errors(site, bad))
 
-    def test_shell_operators_in_a_template_are_rejected(self, site):
-        bad = allow(actions=[{**ACTION, "command": ACTION["command"] + " && reboot"}])
-        assert any("shell operators" in err for err in self.errors(site, bad))
+    @pytest.mark.parametrize("suffix", [" && reboot", " 'x'", " ~/x", " *", "  x", " $HOME"])
+    def test_templates_outside_the_safe_character_set_are_rejected(self, site, suffix):
+        bad = allow(actions=[{**ACTION, "command": ACTION["command"] + suffix}])
+        assert any("no quoting, shell operators" in err for err in self.errors(site, bad))
 
     def test_placeholders_and_parameters_must_agree(self, site):
         params = {"cluster": {"values": ["main"]}, "namespace": {"values": ["shop"]}, "extra": {"values": ["x"]}}

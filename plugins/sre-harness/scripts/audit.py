@@ -34,6 +34,7 @@ import argparse
 import hashlib
 import json
 import re
+import shlex
 import shutil
 import subprocess  # noqa: S404 - fixed argv, no shell
 import sys
@@ -96,7 +97,10 @@ def verify(entries: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
         "approvals": events.get("approval", 0),
         "tier2_claims": events.get("tier2", 0),
         "unauthorised_mutations": unauthorised_mutations(entries),
-        "mutation_detection": "pattern-based on shell commands; file edits made with other tools are not classified",
+        "mutation_detection": (
+            "pattern-based on shell commands, per simple command; a command too long to classify counts as a "
+            "mutation; file edits made with other tools are not classified"
+        ),
         "rebinds": events.get("rebind", 0),
         "state_dir_access": state_dir_access(entries),
         "leftover_secrets": leftover_secrets(entries),
@@ -130,30 +134,76 @@ MUTATING = tuple(
         r"\btee\b|\bsed\s+(-\S{0,8}i|--in-place)",
     )
 )
-# The harness's own record-keeping changes the tracker and the audit branch; that is not a system change.
-RECORD_KEEPING = re.compile(
-    r"scripts/(incident|timeline|audit|autonomy|catalog_sync|catalog_check|validate_site)\.py\b"
+# The harness's own record-keeping changes the tracker and the audit branch; that is not a
+# system change. Only a segment that is itself one plain call of a harness script is exempt.
+HARNESS_CALL = re.compile(
+    r"(?:\S*/)?scripts/(incident|timeline|audit|autonomy|catalog_sync|catalog_check|validate_site)\.py"
 )
-MAX_CLASSIFY = 4000
+SUBSTITUTION = re.compile(r"\$\(|`|<\(|>\(")
+MAX_CLASSIFY = 20000
+
+
+def _segments(command: str) -> list[list[str]] | None:
+    """Split a command into simple commands at unquoted shell operators. None if it cannot be parsed."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token and set(token) <= set(";&|<>()"):
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    return [segment for segment in segments if segment]
+
+
+def _is_harness_call(tokens: list[str]) -> bool:
+    """True for 'scripts/x.py …', 'uv run scripts/x.py …' or 'python3 scripts/x.py …' and nothing else."""
+    words = list(tokens)
+    if words[:2] == ["uv", "run"]:
+        words = [w for w in words[2:] if not w.startswith("-")] if len(words) > 2 else []
+    elif words and re.fullmatch(r"python3?(\.\d+)?", words[0]):
+        words = words[1:]
+    return bool(words) and bool(HARNESS_CALL.fullmatch(words[0]))
 
 
 def is_mutation(command: str) -> bool:
-    """Whether a shell command looks like it changes a system."""
-    command = command[:MAX_CLASSIFY]
-    return bool(command) and not RECORD_KEEPING.search(command) and any(p.search(command) for p in MUTATING)
+    """Whether a shell command looks like it changes a system.
+
+    Fails closed: a command too long to classify, or one that cannot be parsed,
+    is treated by its whole text; substitution anywhere removes any exemption.
+    """
+    if not command.strip():
+        return False
+    if len(command) > MAX_CLASSIFY:
+        return True
+    segments = None if SUBSTITUTION.search(command) else _segments(command)
+    if segments is None:
+        return any(pattern.search(command) for pattern in MUTATING)
+    for tokens in segments:
+        if _is_harness_call(tokens):
+            continue
+        if any(pattern.search(" ".join(tokens)) for pattern in MUTATING):
+            return True
+    return False
 
 
 def unauthorised_mutations(entries: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
-    """Mutating commands that ran with neither a recorded approval nor a Tier 2 claim for that exact command.
+    """Mutating shell commands that ran with no recorded approval for that exact command.
 
-    An approval or claim authorises one run of its command, and must come before it.
+    An approval authorises one run of its command, and must come before it. Tier 2
+    actions do not appear here: autonomy.py executes them itself and records them, so a
+    pre-approved command typed into a shell instead is, correctly, reported.
     Commands are compared as recorded, that is, after redaction on both sides.
     """
     credit: dict[str, int] = {}
     found = []
     for _line, record in entries:
         event = record.get("event")
-        if event in ("approval", "tier2") and record.get("command"):
+        if event == "approval" and record.get("command"):
             credit[record["command"]] = credit.get(record["command"], 0) + 1
             continue
         if record.get("tool") == "Bash" and event == "attempt":

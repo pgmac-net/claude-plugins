@@ -4,6 +4,10 @@
 #
 # A command is Tier 2 only if it matches a template exactly, token for token,
 # with every {placeholder} satisfying its rule. Anything else is Tier 1.
+#
+# Templates may use only letters, digits, . _ : / = @ , + - and single spaces.
+# No quoting, pipes or shell expansion: the harness runs the command itself,
+# without a shell. An action that needs more is a script on the target.
 schema_version: 1
 
 # Site-wide switch. While false, every action is Tier 1.

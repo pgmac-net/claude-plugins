@@ -20,7 +20,7 @@ Each timeline entry you post also pins the log's current head hash and record co
 
 ## What you must add
 
-The hook proves a command ran. It cannot know why it was allowed. A Tier 2 claim records itself (`autonomy.md`). Before every Tier 1 mutation, once the person has said yes, record the approval, giving `--command` exactly as you will run it so the two can be paired:
+The hook proves a command ran. It cannot know why it was allowed. A Tier 2 action is run and recorded by `autonomy.py run` (`autonomy.md`). Before every Tier 1 mutation, once the person has said yes, record the approval, giving `--command` exactly as you will run it so the two can be paired:
 
 ```bash
 uv run <plugin root>/scripts/audit.py record --kind approval \
@@ -39,7 +39,7 @@ uv run <plugin root>/scripts/audit.py show      # where it is, how many records
 uv run <plugin root>/scripts/audit.py verify --check-anchors
 #   chain intact? matches the hashes pinned in the timeline? attempts that never completed?
 #   anything that touched the state directory? anything secret-shaped left after redaction?
-#   any mutating command with neither an approval nor a Tier 2 claim?
+#   any mutating shell command with no approval for that exact command?
 ```
 
 ## Closing

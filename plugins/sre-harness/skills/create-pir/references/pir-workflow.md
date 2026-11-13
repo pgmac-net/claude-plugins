@@ -89,7 +89,7 @@ Comment on the tracking issue: the review, the pull request, every action item. 
 uv run <plugin root>/scripts/audit.py verify
 ```
 
-State its findings in the review, plainly: how many records, how many were self-reported rather than captured by a hook, approvals and Tier 2 claims, any attempt that never completed (a denied or interrupted command, worth a sentence each), any capture errors, anything that touched the harness's state directory, and **every mutating command that ran with neither an approval nor a Tier 2 claim**. Each of those needs an explanation or becomes an action item. Say that mutation detection is pattern-based. If the chain is broken, say so and stop: that is a finding for the person, not something to repair.
+State its findings in the review, plainly: how many records, how many were self-reported rather than captured by a hook, approvals, Tier 2 actions run and their exit codes, any attempt that never completed (a denied or interrupted command, worth a sentence each), any capture errors, anything that touched the harness's state directory, and **every mutating shell command that ran with no approval for that exact command**. Each of those needs an explanation or becomes an action item. Say that mutation detection is pattern-based. If the chain is broken, say so and stop: that is a finding for the person, not something to repair.
 
 Then, with the review's pull request open:
 

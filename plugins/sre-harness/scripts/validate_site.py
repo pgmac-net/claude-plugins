@@ -176,8 +176,11 @@ def _action_problems(action: dict[str, Any], known: set[str]) -> list[str]:
     problems = []
     if action["service"] not in known:
         problems.append(f"service {action['service']} is not in the catalog")
-    if autonomy.SHELL_OPERATORS.search(action["command"]):
-        problems.append("command uses shell operators or substitution; only one simple command is allowed")
+    if not autonomy.SAFE_TEMPLATE.fullmatch(action["command"]):
+        problems.append(
+            "command may contain only letters, digits, . _ : / = @ , + - {placeholders} and single spaces; "
+            "no quoting, shell operators or anything a shell would expand"
+        )
     used = set(autonomy.PLACEHOLDER.findall(action["command"]))
     rules = action.get("parameters", {})
     problems += [f"placeholder {{{name}}} has no rule under parameters" for name in sorted(used - set(rules))]

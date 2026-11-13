@@ -92,10 +92,11 @@ What it is not: tamper-proof. The log and the files that switch capture on belon
 **Autonomy tiers.** Tier 0 is read-only diagnostics, run freely. Tier 1 is any mutation: confirmed by a person after the blast radius is stated. Tier 2 is a mutation the site has pre-approved in its allow-list (`incident.autonomy_file`): an exact command template per service, with a rule for each variable part, a precondition, and a per-incident limit.
 
 ```bash
-uv run scripts/autonomy.py claim --command "<exact command>" --service component:<name> --precondition-evidence "<what was observed>"
+uv run scripts/autonomy.py match --command "<exact command>" --service component:<name>
+uv run scripts/autonomy.py run   --command "<exact command>" --service component:<name> --precondition-evidence "<what was observed>"
 ```
 
-A script decides, by token-for-token match; the agent does not. Shell operators, an extra flag or a different target make it Tier 1. The list is empty and switched off by default. Afterwards, `audit.py verify` reports every mutating command that ran with neither an approval nor a Tier 2 claim; that detection is pattern-based. See [ADR 0011](docs/adr/0011-tier-two-is-an-exact-match-allow-list.md).
+A script decides, by token-for-token match, and the same script executes the command as an argument list with no shell; the agent never types a pre-approved command into a shell. Commands are confined to letters, digits, `. _ : / = @ , + -` and single spaces, so there is nothing for a shell to read differently. The list is empty and switched off by default, and `run` refuses during a drill. Afterwards, `audit.py verify` reports every mutating shell command that ran with no approval for that exact command; that detection is pattern-based. See [ADR 0011](docs/adr/0011-tier-two-is-an-exact-match-allow-list.md).
 
 **Site procedures.** The skills say *when*; the site says *how*. `site.yaml` lists procedure files per stage (`triage`, `evidence`, `comms`, `review`) under `incident.procedures`, and the skills read them at that stage. This is where monitoring access, fallbacks, evidence capture and review format live. See [ADR 0010](docs/adr/0010-site-procedures-carry-the-how.md).
 
@@ -120,7 +121,7 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 | `scripts/timeline.py` | Writes, reads and exports timeline entries; says when a status update is due |
 | `hooks/hooks.json`, `scripts/audit_hook.py` | The audit hook: captures tool calls during an incident |
 | `scripts/audit.py` | Explicit audit records, verification, commit to the audit location |
-| `scripts/autonomy.py` | Decides whether a command is a pre-approved action; records claims |
+| `scripts/autonomy.py` | Decides whether a command is a pre-approved action, and executes it without a shell |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
 | `templates/site-repo/` | Starter layout for a new site repository |
