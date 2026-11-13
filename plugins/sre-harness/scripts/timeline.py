@@ -35,12 +35,15 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import audit_hook
 import sre_common
 from sre_common import SiteError, guarded, iso_utc, load_site, local_clock, parse_utc, utc_now
 
 TYPES = ("discovery", "milestone", "action", "update", "handover", "summary", "decision")
 STATUS_TYPES = ("update", "handover", "summary")
-MARKER = re.compile(r"^<!-- sre-harness:timeline v1 type=([a-z]+) at=(\S+) -->\s*$")
+MARKER = re.compile(
+    r"^<!-- sre-harness:timeline v1 type=([a-z]+) at=(\S+)(?: audit=([0-9a-f]{64}) n=(\d{1,9}))? -->\s*$"
+)
 VISIBLE = re.compile(r"^\*\*[^*]+\*\* — ?")
 HANDOVER_FIELDS = (
     ("state", "State"),
@@ -51,9 +54,15 @@ HANDOVER_FIELDS = (
 )
 
 
-def render(entry_type: str, text: str, moment, timezone: str) -> str:
-    """The comment body for one entry."""
-    marker = f"<!-- sre-harness:timeline v1 type={entry_type} at={iso_utc(moment)} -->"
+def render(entry_type: str, text: str, moment, timezone: str, anchor: tuple[int, str] | None = None) -> str:
+    """The comment body for one entry.
+
+    When the incident has an audit log, the marker also carries the log's
+    record count and head hash at this moment. The comment lives on the code
+    host, so the log cannot later be rewritten below that point unnoticed.
+    """
+    pin = f" audit={anchor[1]} n={anchor[0]}" if anchor else ""
+    marker = f"<!-- sre-harness:timeline v1 type={entry_type} at={iso_utc(moment)}{pin} -->"
     return f"{marker}\n**{local_clock(moment, timezone)} · {entry_type.capitalize()}** — {text.strip()}\n"
 
 
@@ -81,7 +90,10 @@ def parse(body: str, created_at: str, author: str, trusted: bool = True) -> dict
     except ValueError:
         return note
     text = VISIBLE.sub("", "\n".join(lines[1:]).strip(), count=1)
-    return {"type": match.group(1), "at": iso_utc(min(claimed, posted)), "text": text, "author": author}
+    entry = {"type": match.group(1), "at": iso_utc(min(claimed, posted)), "text": text, "author": author}
+    if match.group(3):
+        entry["audit_anchor"] = {"records": int(match.group(4)), "head": match.group(3)}
+    return entry
 
 
 def fetch(state: dict[str, Any], responders: list[str] | None = None) -> list[dict[str, Any]]:
@@ -115,7 +127,7 @@ def post(state: dict[str, Any], entry_type: str, text: str, timezone: str, at: s
     if not text.strip():
         raise SiteError("an entry needs text")
     moment = parse_utc(at) if at else utc_now()
-    body = render(entry_type, text, moment, timezone)
+    body = render(entry_type, text, moment, timezone, audit_hook.head(state["id"]))
     return sre_common.run_gh(
         ["issue", "comment", str(state["number"]), "--repo", state["repo"], "--body-file", "-"], stdin=body
     ).strip()

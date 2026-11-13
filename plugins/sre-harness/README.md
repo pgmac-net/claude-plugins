@@ -77,15 +77,17 @@ uv run scripts/incident.py close      # resolved; the issue stays open for a per
 
 Timeline entry types: `discovery`, `action`, `decision`, `milestone`, `update`, `handover`, `summary`. Each is one comment with a hidden marker line and a line people read. Comments typed by a person are kept as notes. A marker is honoured only from the tracker repository's owner, members and collaborators, or a login listed under `incident.responders`; from anyone else it is kept as a flagged note, so a stranger commenting on a public tracker cannot forge an entry or its time.
 
-**Audit log.** While an incident is open, a hook records every tool call the session attempts and completes: inputs redacted, output as size and SHA-256 only, each line chained to the one before. It records nothing outside an incident and never blocks a tool call. Approvals are added explicitly; agents without hooks self-report, and are marked so.
+**Audit log.** While an incident is open, a hook records every tool call the session attempts and completes: inputs redacted, file content and tool output as size and SHA-256 only, each line chained to the one before. It records nothing outside an incident and never blocks a tool call. Approvals are added explicitly; agents without hooks self-report, and are marked so.
 
 ```bash
 uv run scripts/audit.py record --kind approval --text "<blast radius>" --command "<command>" --approver "<who>"
-uv run scripts/audit.py verify     # chain intact? attempts that never completed?
+uv run scripts/audit.py verify --check-anchors
 uv run scripts/audit.py commit     # to the site's private audit location, on a branch, as a pull request
 ```
 
-The log is spooled under `~/.local/state/sre-harness/` during the incident and committed at the end. Limits: the hook fails open; redaction is pattern-based; the chain alone cannot show a change to the last line, so the head hash goes in the commit message.
+The log is spooled under `~/.local/state/sre-harness/` during the incident and committed at the end. A session is bound to an incident by a single-use token that `incident.py` issues. Every timeline entry pins the log's head hash and record count in its marker on the code host, so a later rewrite of the log shows up in `verify --check-anchors`. `commit` refuses a broken chain, a log that disagrees with its pinned hashes, or one with a secret left in it.
+
+What it is not: tamper-proof. The log and the files that switch capture on belong to the same user as the agent, so a process set on defeating them can. The checks make accidents and later edits visible. Off-host shipping of records is the control for a hostile process and is not built yet. Also: the hook fails open, and redaction is pattern-based.
 
 **Site procedures.** The skills say *when*; the site says *how*. `site.yaml` lists procedure files per stage (`triage`, `evidence`, `comms`, `review`) under `incident.procedures`, and the skills read them at that stage. This is where monitoring access, fallbacks, evidence capture and review format live. See [ADR 0010](docs/adr/0010-site-procedures-carry-the-how.md).
 

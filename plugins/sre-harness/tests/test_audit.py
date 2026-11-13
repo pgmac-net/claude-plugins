@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import audit
@@ -14,6 +15,7 @@ import audit_hook
 import pytest
 import redact
 import sre_common
+import timeline
 
 PLUGIN = Path(__file__).resolve().parent.parent
 TOKEN = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
@@ -33,11 +35,19 @@ def call(event: str, tool: str = "Bash", tool_input=None, response=None, session
 
 
 def open_incident(session: str = "s1", incident: str = "incidents-7") -> None:
+    """What the hook sees when a session runs incident.py open: a bind token incident.py stored."""
+    token = hashlib.sha256(f"{session}{incident}".encode()).hexdigest()[:32]
+    binds = audit_hook.state_dir() / "binds"
+    binds.mkdir(parents=True, exist_ok=True)
+    (binds / token).write_text(incident + "\n", encoding="utf-8")
     audit_hook.handle(
         call(
             "PostToolUse",
             tool_input={"command": "uv run /x/scripts/incident.py open --title T --severity P2"},
-            response={"stdout": json.dumps({"id": incident, "url": "https://example.com/7"}), "stderr": ""},
+            response={
+                "stdout": json.dumps({"id": incident, "url": "https://example.com/7", "bind": token}),
+                "stderr": "",
+            },
             session=session,
         )
     )
@@ -84,10 +94,52 @@ class TestRedaction:
         out = redact.redact_text("curl -u x:another-value-123 -H s3cr3t-value-xyz", values)
         assert out == "curl -u x:[REDACTED:env SITE_CRED] -H [REDACTED:env GRAFANA_TOKEN]"
 
+    @pytest.mark.parametrize(
+        ("text", "secret"),
+        [
+            ("mysql --password hunter2hunter2 -e 'select 1'", "hunter2hunter2"),
+            ("tool --api-key abcdef123456 run", "abcdef123456"),
+            ("curl -u shop:hunter2hunter2 https://example.com", "hunter2hunter2"),
+            ("curl --user 'shop:hunter2 hunter2' https://example.com", "hunter2"),
+            ("curl -H 'Authorization: Basic c2hvcDpodW50ZXIy' https://example.com", "c2hvcDpodW50ZXIy"),
+            ("vault login -token-only --token s.AbCdEfGh1234", "s.AbCdEfGh1234"),
+        ],
+    )
+    def test_flag_and_header_credentials_are_replaced(self, text, secret):
+        out = redact.redact_text(text)
+        assert secret not in out
+        assert "[REDACTED:" in out
+
+    def test_a_replacement_is_never_redacted_again(self):
+        out = redact.redact_text("x --password hunter2hunter2 --token=abcdef123456 -u a:bcdefgh")
+        assert out.count("[REDACTED:") == 3
+        assert "REDACTED:REDACTED" not in out and "[REDACTED:[" not in out
+
+    def test_file_content_is_stored_as_a_digest_only(self):
+        secret_file = "db_password = hunter2hunter2\n" * 3
+        out = redact.redact(
+            {"file_path": "/etc/app.conf", "content": secret_file, "new_string": "x", "replace_all": True}
+        )
+        assert out["file_path"] == "/etc/app.conf" and out["replace_all"] is True
+        assert out["content"] == {
+            "omitted": "content",
+            "bytes": len(secret_file.encode()),
+            "sha256": hashlib.sha256(secret_file.encode()).hexdigest(),
+        }
+        assert out["new_string"]["omitted"] == "content"
+
+    def test_huge_input_is_bounded_before_any_pattern_runs(self):
+        nasty = ("password" * 20000) + ("=" * 20000) + ("-----BEGIN " + "PRIVATE KEY-----" + "A" * 200000)
+        started = time.monotonic()
+        out = redact.redact_text(nasty)
+        assert time.monotonic() - started < 1.0
+        assert len(out) < 2300
+
     def test_long_strings_are_truncated_with_a_digest(self):
         out = redact.redact_text("a" * 5000)
         assert len(out) < 2200
-        assert "truncated 3000 chars" in out
+        assert "truncated; original 5000 chars" in out
+        assert hashlib.sha256(("a" * 5000).encode()).hexdigest() in out
 
     def test_nested_structures_keep_their_keys(self):
         out = redact.redact({"command": f"echo {TOKEN}", "args": [TOKEN, 3], "n": 1})
@@ -118,11 +170,37 @@ class TestHook:
         assert records[0]["prev"] == audit_hook.GENESIS
 
     @pytest.mark.usefixtures("state")
-    def test_a_command_that_only_mentions_the_script_does_not_bind(self):
-        audit_hook.handle(
-            call("PostToolUse", tool_input={"command": "cat scripts/incident.py"}, response={"stdout": '{"id": "x-1"}'})
-        )
+    def test_printing_an_id_or_an_unknown_token_binds_nothing(self):
+        forged = {"stdout": json.dumps({"id": "incidents-7", "bind": "0" * 32})}
+        audit_hook.handle(call("PostToolUse", tool_input={"command": "echo incident.py open"}, response=forged))
         assert audit_hook.bound_incident("s1") is None
+        assert not (audit_hook.state_dir() / "audit").exists()
+
+    @pytest.mark.usefixtures("state")
+    def test_bind_token_is_single_use_and_the_id_comes_from_the_file(self):
+        open_incident()
+        assert list((audit_hook.state_dir() / "binds").iterdir()) == []
+        token = hashlib.sha256(b"s1incidents-7").hexdigest()[:32]
+        replay = {"stdout": json.dumps({"id": "incidents-999", "bind": token})}
+        audit_hook.handle(call("PostToolUse", tool_input={"command": "x"}, response=replay, session="s9"))
+        assert audit_hook.bound_incident("s9") is None
+
+    @pytest.mark.usefixtures("state")
+    def test_rebinding_a_live_session_is_recorded_in_the_log_it_leaves(self):
+        open_incident()
+        open_incident(incident="incidents-8")
+        assert audit_hook.bound_incident("s1") == "incidents-8"
+        left = log("incidents-7")[-1]
+        assert (left["event"], left["to"]) == ("rebind", "incidents-8")
+        assert audit.verify(audit.read_log("incidents-7"))["rebinds"] == 1
+
+    @pytest.mark.usefixtures("state")
+    def test_append_reads_only_the_tail_and_keeps_the_chain(self):
+        open_incident()
+        for index in range(40):
+            audit_hook.handle(call("PreToolUse", tool_input={"command": f"echo {index} " + "x" * 3000}))
+        assert audit.verify(audit.read_log("incidents-7"))["chain_intact"] is True
+        assert audit_hook.head("incidents-7")[0] == 41
 
     @pytest.mark.usefixtures("state")
     def test_other_sessions_are_not_captured(self):
@@ -277,7 +355,7 @@ class TestAuditCli:
         git("remote", "add", "origin", str(remote))
         git("push", "-u", "origin", "main")
 
-        assert audit.main(["commit", "--no-pr"]) == 0
+        assert audit.main(["commit", "--no-pr", "--offline"]) == 0
         out = json.loads(capsys.readouterr().out)
         assert out["branch"] == "audit/catalog-5" and out["file"] == "audit/catalog-5.jsonl"
         shown = subprocess.run(
@@ -297,5 +375,66 @@ class TestAuditCli:
     def test_commit_refuses_a_broken_chain(self, capsys):
         path = audit_hook.spool_path("catalog-5")
         path.write_text('{"tampered": true}\n' + path.read_text(encoding="utf-8"), encoding="utf-8")
-        assert audit.main(["commit", "--no-pr"]) == 2
+        assert audit.main(["commit", "--no-pr", "--offline"]) == 2
         assert "hash chain is broken" in capsys.readouterr().err
+
+
+class TestHardening:
+    @pytest.mark.usefixtures("state")
+    def test_touching_the_state_directory_is_reported(self):
+        open_incident()
+        marker = str(audit_hook.state_dir() / "active")
+        audit_hook.handle(call("PreToolUse", tool_input={"command": f"rm {marker}"}))
+        audit_hook.handle(call("PreToolUse", tool_input={"command": "uv run p/scripts/audit.py show"}))
+        found = audit.verify(audit.read_log("incidents-7"))["state_dir_access"]
+        assert [item["input"]["command"] for item in found] == [f"rm {marker}"]
+
+    @pytest.mark.usefixtures("state")
+    def test_a_secret_that_survived_redaction_blocks_publication(self, site, monkeypatch, capsys):
+        monkeypatch.setenv("SRE_HARNESS_SITE", str(site))
+        sre_common.write_incident_state({"id": "catalog-5", "repo": "o/r", "number": 5, "url": "u", "title": "T"})
+        audit_hook.append("catalog-5", {"v": 1, "ts": "2026-01-02T03:04:05Z", "event": "note", "text": TOKEN})
+        result = audit.verify(audit.read_log("catalog-5"))
+        assert result["leftover_secrets"] == [{"line": 1, "looks_like": ["GitHub token"]}]
+        assert audit.main(["commit", "--no-pr", "--offline"]) == 2
+        err = capsys.readouterr().err
+        assert "still look like they hold a secret" in err and TOKEN not in err
+
+    @pytest.mark.usefixtures("state")
+    def test_redacted_lines_are_not_mistaken_for_secrets(self):
+        open_incident()
+        audit_hook.handle(call("PreToolUse", tool_input={"command": f"curl -H 'Authorization: Bearer {TOKEN}' x"}))
+        assert audit.verify(audit.read_log("incidents-7"))["leftover_secrets"] == []
+
+    @pytest.mark.usefixtures("state")
+    def test_timeline_anchors_catch_a_rewritten_log(self, monkeypatch):
+        open_incident()
+        audit_hook.handle(call("PreToolUse", tool_input={"command": "kubectl delete pod x"}))
+        count, head = audit_hook.head("incidents-7")
+        pinned = [{"type": "action", "at": "2026-01-02T03:04:05Z", "audit_anchor": {"records": count, "head": head}}]
+        monkeypatch.setattr(audit.timeline, "fetch", lambda _state, _responders=None: pinned)
+        state_doc = {"id": "incidents-7"}
+        assert audit.check_anchors(state_doc, audit.read_log("incidents-7"), None) == {
+            "anchors_checked": 1,
+            "anchor_mismatches": [],
+        }
+        # Rewrite the whole log without the deletion, recomputing the chain so it looks intact.
+        path = audit_hook.spool_path("incidents-7")
+        first = path.read_text(encoding="utf-8").splitlines()[0]
+        path.write_text(first + "\n", encoding="utf-8")
+        audit_hook.handle(call("PreToolUse", tool_input={"command": "ls"}))
+        entries = audit.read_log("incidents-7")
+        assert audit.verify(entries)["chain_intact"] is True
+        problems = audit.check_anchors(state_doc, entries, None)["anchor_mismatches"]
+        assert len(problems) == 1 and "not the one pinned" in problems[0]["problem"]
+
+    def test_timeline_marker_carries_and_parses_the_anchor(self):
+        moment = sre_common.parse_utc("2026-01-02T03:04:05Z")
+        body = timeline.render("action", "did it", moment, "Etc/UTC", (12, "a" * 64))
+        assert body.splitlines()[0].endswith(f"audit={'a' * 64} n=12 -->")
+        entry = timeline.parse(body, "2026-01-02T03:05:00Z", "owner")
+        assert entry["audit_anchor"] == {"records": 12, "head": "a" * 64}
+        assert (
+            timeline.parse(timeline.render("action", "x", moment, "Etc/UTC"), "2026-01-02T03:05:00Z", "o")["type"]
+            == "action"
+        )

@@ -6,7 +6,10 @@
 """Work with the audit log of an incident.
 
 The log is written by the audit hook (audit_hook.py) while the incident is
-open: one JSON line per tool call attempted and completed. This script adds
+open: one JSON line per tool call attempted and completed. It is a record
+kept by a cooperating agent, with checks that make damage and later edits
+visible; it is not proof against a process on the same account that sets out
+to defeat it (see audit_hook.py). This script adds
 the records a hook cannot make, checks the log, and commits it to the site's
 private audit location when the incident is over.
 
@@ -30,6 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess  # noqa: S404 - fixed argv, no shell
 import sys
@@ -41,6 +45,7 @@ from typing import Any
 import audit_hook
 import redact
 import sre_common
+import timeline
 from sre_common import SiteError, guarded, load_site
 
 KINDS = ("approval", "denial", "decision", "command", "note")
@@ -88,7 +93,60 @@ def verify(entries: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
         "attempts_without_completion": [
             {"ts": record["ts"], "tool": record.get("tool"), "input": record.get("input")} for record in unfinished
         ],
+        "rebinds": events.get("rebind", 0),
+        "state_dir_access": state_dir_access(entries),
+        "leftover_secrets": leftover_secrets(entries),
     }
+
+
+HARNESS_SCRIPT = re.compile(r"scripts/(?:incident|timeline|audit|autonomy)\.py\b")
+STATE_ACCESS = re.compile(r"sre-harness/(?:active|audit|sessions|binds|incidents)\b|state/sre-harness\b")
+
+
+def state_dir_access(entries: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Tool calls that touched the harness's own state files, other than through its scripts.
+
+    Those files decide whether capture happens. Nothing but the harness scripts
+    has a reason to touch them during an incident.
+    """
+    found = []
+    for _line, record in entries:
+        if record.get("event") != "attempt":
+            continue
+        text = json.dumps(record.get("input") or {})
+        if STATE_ACCESS.search(text) and not HARNESS_SCRIPT.search(text):
+            found.append({"ts": record["ts"], "tool": record.get("tool"), "input": record.get("input")})
+    return found
+
+
+def leftover_secrets(entries: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Lines that still contain something secret-shaped after redaction. Values are not returned."""
+    found = []
+    for number, (line, _record) in enumerate(entries, start=1):
+        labels = redact.find_secrets_in_text(line.replace("[REDACTED:", "[R "))
+        if labels:
+            found.append({"line": number, "looks_like": sorted(set(labels))})
+    return found
+
+
+def check_anchors(
+    state: dict[str, Any], entries: list[tuple[str, dict[str, Any]]], responders: list[str] | None
+) -> dict[str, Any]:
+    """Compare the log with the head hashes pinned in the incident's timeline comments."""
+    mismatches = []
+    checked = 0
+    for entry in timeline.fetch(state, responders):
+        pin = entry.get("audit_anchor")
+        if not pin:
+            continue
+        checked += 1
+        count = pin["records"]
+        if count > len(entries):
+            problem = f"timeline pinned {count} records; the log has {len(entries)}"
+            mismatches.append({"at": entry["at"], "problem": problem})
+        elif hashlib.sha256(entries[count - 1][0].encode()).hexdigest() != pin["head"]:
+            mismatches.append({"at": entry["at"], "problem": f"record {count} is not the one pinned in the timeline"})
+    return {"anchors_checked": checked, "anchor_mismatches": mismatches}
 
 
 def cmd_record(args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, Any], _root: Path) -> int:
@@ -113,15 +171,19 @@ def cmd_record(args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, 
 
 def cmd_show(_args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, Any], _root: Path) -> int:
     summary = verify(read_log(state["id"]))
-    summary.pop("attempts_without_completion")
+    for key in ("attempts_without_completion", "state_dir_access"):
+        summary.pop(key)
     print(json.dumps({"path": str(audit_hook.spool_path(state["id"])), **summary}, indent=2))
     return 0
 
 
-def cmd_verify(_args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, Any], _root: Path) -> int:
-    result = verify(read_log(state["id"]))
+def cmd_verify(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, Any], _root: Path) -> int:
+    entries = read_log(state["id"])
+    result = verify(entries)
+    if args.check_anchors:
+        result.update(check_anchors(state, entries, doc["incident"].get("responders")))
     print(json.dumps(result, indent=2))
-    return 0 if result["chain_intact"] else 1
+    return 0 if result["chain_intact"] and not result.get("anchor_mismatches") else 1
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -161,6 +223,19 @@ def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, A
     result = verify(entries)
     if not result["chain_intact"]:
         raise SiteError(f"the hash chain is broken at line(s) {result['broken_at_lines']}; not committing")
+    if result["leftover_secrets"]:
+        lines = ", ".join(str(item["line"]) for item in result["leftover_secrets"])
+        raise SiteError(
+            f"line(s) {lines} of the log still look like they hold a secret; not publishing it. "
+            "Run audit.py verify, show the person, and rotate anything real"
+        )
+    if not args.offline:
+        pinned = check_anchors(state, entries, doc["incident"].get("responders"))
+        if pinned["anchor_mismatches"]:
+            raise SiteError(
+                f"the log does not match {len(pinned['anchor_mismatches'])} head hash(es) pinned in the timeline; "
+                "not committing. Run audit.py verify --check-anchors"
+            )
 
     checkout = audit_checkout(doc, site_root)
     remote_head = (
@@ -220,12 +295,15 @@ def build_parser() -> argparse.ArgumentParser:
     record.set_defaults(run=cmd_record)
 
     sub.add_parser("show", help="where the log is and what it holds").set_defaults(run=cmd_show)
-    sub.add_parser("verify", help="check the hash chain; list attempts that never completed").set_defaults(
-        run=cmd_verify
+    verifier = sub.add_parser("verify", help="check the hash chain; list attempts that never completed")
+    verifier.add_argument(
+        "--check-anchors", action="store_true", help="also compare with head hashes pinned in the timeline (needs gh)"
     )
+    verifier.set_defaults(run=cmd_verify)
 
     commit = sub.add_parser("commit", help="commit the log to the audit repository and stop capture")
     commit.add_argument("--no-pr", action="store_true", help="push the branch but do not open a pull request")
+    commit.add_argument("--offline", action="store_true", help="skip the comparison with the timeline's pinned hashes")
     commit.set_defaults(run=cmd_commit)
     return parser
 

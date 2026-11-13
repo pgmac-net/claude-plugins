@@ -7,12 +7,20 @@ the session is bound to an incident, and it never blocks a tool call: every
 path exits 0 with no output.
 
 Standard library only, so it starts fast and cannot fail for want of a
-package. A session is bound to an incident when the hook sees that session
-run `incident.py open` or `incident.py attach` successfully.
+package. A session is bound to an incident when its tool output carries a
+single-use bind token that incident.py wrote to the state directory: the
+incident id is read from that file, never from the output.
 
 Each record is one JSON line. Tool output is stored as size and SHA-256 only.
-Records are chained: each carries the hash of the line before it, so an edit
-or deletion is detectable.
+Records are chained: each carries the hash of the line before it.
+
+What this does and does not guarantee: the log, the bind tokens and the
+marker that switches capture on are files owned by the same user the agent
+runs as. An agent that sets out to evade or rewrite them can. The chain and
+the head hashes anchored in timeline comments make accidental damage and
+after-the-fact edits visible; they are not a defence against a hostile
+process on the same account. Shipping records off-host as they are written
+is the control for that, and is not part of this hook.
 """
 
 from __future__ import annotations
@@ -31,8 +39,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import redact  # noqa: E402  pylint: disable=wrong-import-position
 
 EVENTS = {"PreToolUse": "attempt", "PostToolUse": "complete"}
-BINDING_COMMAND = re.compile(r"incident\.py\b.*\b(open|attach)\b", re.DOTALL)
-INCIDENT_ID = re.compile(r'"id":\s*"([a-z][a-z0-9_-]*-\d+)"')
+BIND_TOKEN = re.compile(r'"bind":\s*"([0-9a-f]{32})"')
+INCIDENT_ID = re.compile(r"^[a-z][a-z0-9_-]*-\d+$")
+TAIL_CHUNK = 65536
 GENESIS = "0" * 64
 
 
@@ -67,14 +76,24 @@ def response_text(response: Any) -> str:
 
 
 def binding_from(payload: dict[str, Any]) -> str | None:
-    """The incident this call opened or attached to, if it did."""
+    """The incident this call opened or attached to, if it did.
+
+    incident.py prints a random single-use token and stores the incident id
+    under it. Only a token that names such a file binds, and the id comes from
+    the file. Printing an id-shaped string binds nothing.
+    """
     if payload.get("hook_event_name") != "PostToolUse" or payload.get("tool_name") != "Bash":
         return None
-    command = str((payload.get("tool_input") or {}).get("command", ""))
-    if not BINDING_COMMAND.search(command):
+    match = BIND_TOKEN.search(response_text(payload.get("tool_response")).replace('\\"', '"'))
+    if not match:
         return None
-    match = INCIDENT_ID.search(response_text(payload.get("tool_response")).replace('\\"', '"'))
-    return match.group(1) if match else None
+    token_file = state_dir() / "binds" / match.group(1)
+    try:
+        incident_id = token_file.read_text(encoding="utf-8").strip()
+        token_file.unlink()
+    except OSError:
+        return None
+    return incident_id if INCIDENT_ID.match(incident_id) else None
 
 
 def credential_names(incident_id: str) -> list[str]:
@@ -110,16 +129,46 @@ def build_record(payload: dict[str, Any], incident_id: str, capture: str = "hook
     return record
 
 
+def last_line(handle) -> str:
+    """The final line of an open file, read from the end so cost does not grow with the log."""
+    handle.seek(0, os.SEEK_END)
+    size = handle.tell()
+    if size == 0:
+        return ""
+    data = b""
+    position = size
+    while position > 0:
+        step = min(TAIL_CHUNK, position)
+        position -= step
+        handle.seek(position)
+        data = handle.read(step) + data
+        stripped = data.rstrip(b"\n")
+        if b"\n" in stripped:
+            return stripped.rsplit(b"\n", 1)[1].decode("utf-8")
+    return data.rstrip(b"\n").decode("utf-8")
+
+
 def append(incident_id: str, record: dict[str, Any]) -> None:
     """Append one chained record under an exclusive lock."""
     path = spool_path(incident_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as handle:
+    with path.open("ab+") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
-        handle.seek(0)
-        lines = handle.read().splitlines()
-        record["prev"] = hashlib.sha256(lines[-1].encode()).hexdigest() if lines else GENESIS
-        handle.write(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n")
+        previous = last_line(handle)
+        record["prev"] = hashlib.sha256(previous.encode()).hexdigest() if previous else GENESIS
+        handle.seek(0, os.SEEK_END)
+        handle.write((json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8"))
+
+
+def head(incident_id: str) -> tuple[int, str] | None:
+    """(record count, hash of the last line) of an incident's log, or None if it has none."""
+    path = spool_path(incident_id)
+    if not path.is_file():
+        return None
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return None
+    return len(lines), hashlib.sha256(lines[-1].encode()).hexdigest()
 
 
 def is_closed(incident_id: str) -> bool:
@@ -133,6 +182,20 @@ def handle(payload: dict[str, Any]) -> None:
     incident_id = bound_incident(session_id)
     opened = binding_from(payload)
     if opened and opened != incident_id:
+        if incident_id and not is_closed(incident_id):
+            # Moving a live session to another incident is recorded where it was, so it cannot go unseen.
+            append(
+                incident_id,
+                {
+                    "v": 1,
+                    "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "incident": incident_id,
+                    "session": session_id,
+                    "capture": "hook",
+                    "event": "rebind",
+                    "to": opened,
+                },
+            )
         bind(session_id, opened)
         incident_id = opened
     if incident_id and not is_closed(incident_id):
