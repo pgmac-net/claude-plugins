@@ -41,9 +41,12 @@ from sre_common import SEVERITIES, SiteError, load_site
 
 DEFAULT_TIMEOUT = 8
 MAX_FIELD = 6000
+if redact.MAX_SCAN < MAX_FIELD:  # every character that can be sent must be scanned for secrets
+    raise RuntimeError("MAX_FIELD must not exceed redact.MAX_SCAN")
 NONE_OPTION = "none"
-# Nothing longer than this is looked at; the rest is dropped before any pattern runs.
-HARD_CAP = 20000
+# When a field is cut, the cut moves back to the last whitespace within this many characters,
+# so that a token is never split.
+CUT_MARGIN = 512
 # Addresses that only mean something inside a site: RFC 1918, CGNAT, link-local,
 # IPv6 unique-local and link-local.
 PRIVATE_ADDRESS = re.compile(
@@ -119,20 +122,30 @@ class Masker:
         return self.names[key]
 
     def text(self, value: str) -> str:
-        """Mask identifiers and private addresses, then redact secrets, then cut.
+        """Cut, then redact secrets, then mask identifiers and private addresses.
 
-        The order matters. Masking runs over everything that could be sent, so
-        an identifier past the cut cannot survive, and nothing derived from the
-        unmasked text (such as a hash of it) is ever added. An identifier is
-        masked wherever it is not part of a longer run of letters and digits,
-        so 'host-data' and 'my_host' are caught as well as 'host'.
+        The order is what makes it safe:
+
+        1. Cut first, to a window small enough that every character of it is
+           scanned. Nothing past the cut can be sent, masked or not. The cut
+           falls back to the last whitespace, so no token is split in two and
+           half a secret cannot be left at the end.
+        2. Redact secrets while the text is still as written. Masking first
+           could change part of a secret and stop its pattern matching.
+        3. Mask identifiers and addresses last, wherever they are not part of
+           a longer run of letters and digits.
+
+        Nothing derived from the uncut text, such as a hash of it, is added.
         """
-        value = value[:HARD_CAP]
+        if len(value) > MAX_FIELD:
+            window = value[:MAX_FIELD]
+            cut = max(window.rfind(" "), window.rfind("\n"), window.rfind("\t"))
+            value = window[:cut] if cut >= MAX_FIELD - CUT_MARGIN else window[: MAX_FIELD - CUT_MARGIN]
+        value = redact.redact_text(value, self.env_values, limit=None, digest=False)
         for identifier in self.identifiers:
             pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(identifier)}(?![A-Za-z0-9])", re.IGNORECASE)
             value = pattern.sub(lambda match: self._placeholder("site", match.group(0)), value)
-        value = PRIVATE_ADDRESS.sub(lambda match: self._placeholder("address", match.group(0)), value)
-        return redact.redact_text(value, self.env_values, limit=MAX_FIELD, digest=False)
+        return PRIVATE_ADDRESS.sub(lambda match: self._placeholder("address", match.group(0)), value)
 
     def node(self, node: Any) -> Any:
         """Mask every string in a JSON-like structure, keys included."""

@@ -136,6 +136,46 @@ class TestMasking:
         assert len(sent) <= assist.MAX_FIELD
         assert "sha256" not in sent and "truncated" not in sent
 
+    @pytest.mark.parametrize(
+        "secret_text",
+        [
+            "db --password x-buildbox01-y9Zq end",
+            "token=abc.buildbox01.def.ghi end",
+            "curl -u admin:buildbox01-s3cret https://example.com end",
+            "Authorization: Bearer abcd1234.buildbox01.wxyz5678 end",
+        ],
+    )
+    def test_a_secret_that_contains_an_identifier_is_still_fully_redacted(self, capsys, service, secret_text):
+        """Masking must not run first: it would change part of the secret and stop its pattern matching."""
+        run(capsys, "entry-type", "--text", secret_text)
+        sent = service[0]["state"]["entry"]
+        for fragment in ("x-", "-y9Zq", "abc.", ".def.ghi", "-s3cret", "abcd1234", "wxyz5678", "buildbox01"):
+            assert fragment not in sent, sent
+        assert "[REDACTED:" in sent
+
+    def test_env_secret_containing_an_identifier_is_redacted_whole(self, monkeypatch, capsys, service):
+        monkeypatch.setenv("SHOP_API_TOKEN", "zz-buildbox01-qq-123456")
+        run(capsys, "entry-type", "--text", "used zz-buildbox01-qq-123456 to log in")
+        assert service[0]["state"]["entry"] == "used [REDACTED:env SHOP_API_TOKEN] to log in"
+
+    @pytest.mark.parametrize("offset", [5, 15, 25, 39])
+    def test_a_secret_straddling_the_cut_is_dropped_not_halved(self, capsys, service, offset):
+        token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+        start = assist.MAX_FIELD - offset
+        text = ("w " * 4000)[: start - 1] + " " + token + " tail tail tail"
+        run(capsys, "entry-type", "--text", text)
+        sent = service[0]["state"]["entry"]
+        assert "ghp_" not in sent and token[:10] not in sent
+        assert len(sent) <= assist.MAX_FIELD
+
+    def test_a_huge_secret_early_cannot_pull_unscanned_text_into_view(self, capsys, service):
+        token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+        key = "-----BEGIN " + "PRIVATE KEY-----\n" + "A" * 5000 + "\n-----END " + "PRIVATE KEY-----"
+        text = key + " " + ("w " * 1500) + token + " tail"
+        run(capsys, "entry-type", "--text", text)
+        sent = service[0]["state"]["entry"]
+        assert "ghp_" not in sent and "AAAA" not in sent
+
     @pytest.mark.parametrize("position", [100, 5990, 6500, 7990, 12000])
     def test_an_identifier_anywhere_in_long_text_is_never_sent(self, capsys, service, position):
         text = ("word " * 4000)[:position] + " buildbox01 " + "tail " * 100

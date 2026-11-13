@@ -26,7 +26,7 @@ Each prints JSON. Ask once per question; do not re-ask to get a different answer
 
 ## What leaves the machine
 
-Enabling the helper sends text to a third party. Before sending, the script replaces the site's identifiers (from its mask file) and private addresses with placeholders, then redacts secrets. Masking is only as good as the mask file: a name that is not listed is sent as written. It refuses to send if the mask file is configured but missing. You still choose what goes in: give it the impact or the symptoms, not command output, credentials or anything about a person.
+Enabling the helper sends text to a third party. Before sending, the script cuts the text to a bounded length, redacts secrets, then replaces the site's identifiers (from its mask file) and private addresses with placeholders. Masking is only as good as the mask file: a name that is not listed is sent as written. It refuses to send if the mask file is configured but missing. You still choose what goes in: give it the impact or the symptoms, not command output, credentials or anything about a person.
 
 ## In the record
 

@@ -21,8 +21,10 @@ final severity. See ADR 0012.
 ## Safety
 
 - **Off by default.** The template ships it disabled. A site opts in.
-- **Masking before sending.** Secrets are redacted; site identifiers from the
-  site's mask file and private addresses become stable placeholders. Runbook
+- **Cut, redact, mask, in that order.** The text is cut at a word boundary to
+  a window that is scanned in full; secrets are redacted while the text is
+  still as written; then site identifiers from the site's mask file and
+  private addresses become stable placeholders. Runbook
   file names are never sent: options are numbered. If a mask file is
   configured and missing, nothing is sent.
 - **Only our labels come back.** An answer that is not one of the options
@@ -38,11 +40,12 @@ An automated security review of the first push found two ways masking could be b
 | Finding | Change |
 |---|---|
 | An identifier joined to other text by `-` or `_` was not masked; IPv6 private and CGNAT addresses were not covered | An identifier is masked wherever it is not part of a longer run of letters and digits; unique-local and link-local IPv6, CGNAT and IPv4 link-local are masked |
-| Text was cut and redacted before masking, and a long string had a hash of its unmasked original appended | Masking runs first, over everything that could be sent; then redaction; then a plain cut. Nothing derived from the original is added |
+| Text was cut and redacted before masking, and a long string had a hash of its unmasked original appended | Nothing derived from the original is added. See the order below |
+| (second review) Masking before redaction could change part of a secret and stop its pattern matching; a secret straddling the scan boundary could be partly sent | The order is now: cut first, back to the last whitespace so no token is split; redact everything that remains; mask last. Every character that can be sent has been scanned |
 
 ## Verification
 
-- 310 tests pass; ruff clean; pylint exit 0. The service call is replaced in
+- 320 tests pass; ruff clean; pylint exit 0. The service call is replaced in
   tests; nothing leaves the machine.
 - Live, with generic made-up text: an outage for all customers gave P1 (1.0);
   one slow dashboard for one user gave P4 (0.92); "deleted the stuck pod …
