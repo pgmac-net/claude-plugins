@@ -42,7 +42,18 @@ from sre_common import SEVERITIES, SiteError, load_site
 DEFAULT_TIMEOUT = 8
 MAX_FIELD = 6000
 NONE_OPTION = "none"
-PRIVATE_ADDRESS = re.compile(r"(?<![\d.])(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}(?![\d.])")
+# Nothing longer than this is looked at; the rest is dropped before any pattern runs.
+HARD_CAP = 20000
+# Addresses that only mean something inside a site: RFC 1918, CGNAT, link-local,
+# IPv6 unique-local and link-local.
+PRIVATE_ADDRESS = re.compile(
+    r"(?<![\d.])(?:"
+    r"10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168|169\.254"
+    r"|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])"
+    r")\.\d{1,3}\.\d{1,3}(?![\d.])"
+    r"|(?<![0-9A-Fa-f:])(?:[fF][cCdD][0-9A-Fa-f]{2}|[fF][eE][89aAbB][0-9A-Fa-f])"
+    r"(?::[0-9A-Fa-f]{0,4}){1,7}(?![0-9A-Fa-f:])"
+)
 GENERIC_SEVERITY = {
     "P1": "Critical. A service many people or other services depend on is down or losing data, with no workaround.",
     "P2": "Major. An important service is down or badly degraded, or a critical one is at risk.",
@@ -108,12 +119,20 @@ class Masker:
         return self.names[key]
 
     def text(self, value: str) -> str:
-        """Redact secrets, then mask identifiers and private addresses."""
-        value = redact.redact_text(value[:MAX_FIELD], self.env_values)
+        """Mask identifiers and private addresses, then redact secrets, then cut.
+
+        The order matters. Masking runs over everything that could be sent, so
+        an identifier past the cut cannot survive, and nothing derived from the
+        unmasked text (such as a hash of it) is ever added. An identifier is
+        masked wherever it is not part of a longer run of letters and digits,
+        so 'host-data' and 'my_host' are caught as well as 'host'.
+        """
+        value = value[:HARD_CAP]
         for identifier in self.identifiers:
-            pattern = re.compile(rf"(?<![\w-]){re.escape(identifier)}(?![\w-])", re.IGNORECASE)
+            pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(identifier)}(?![A-Za-z0-9])", re.IGNORECASE)
             value = pattern.sub(lambda match: self._placeholder("site", match.group(0)), value)
-        return PRIVATE_ADDRESS.sub(lambda match: self._placeholder("address", match.group(0)), value)
+        value = PRIVATE_ADDRESS.sub(lambda match: self._placeholder("address", match.group(0)), value)
+        return redact.redact_text(value, self.env_values, limit=MAX_FIELD, digest=False)
 
     def node(self, node: Any) -> Any:
         """Mask every string in a JSON-like structure, keys included."""

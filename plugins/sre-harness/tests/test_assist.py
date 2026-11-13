@@ -130,9 +130,60 @@ class TestMasking:
         run(capsys, "entry-type", "--text", "the key is " + "k" * 40)
         assert "k" * 40 not in json.dumps(service[0])
 
-    def test_long_input_is_cut_before_sending(self, capsys, service):
+    def test_long_input_is_cut_and_nothing_derived_from_the_original_is_sent(self, capsys, service):
         run(capsys, "entry-type", "--text", "word " * 5000)
-        assert len(service[0]["state"]["entry"]) < 2400
+        sent = service[0]["state"]["entry"]
+        assert len(sent) <= assist.MAX_FIELD
+        assert "sha256" not in sent and "truncated" not in sent
+
+    @pytest.mark.parametrize("position", [100, 5990, 6500, 7990, 12000])
+    def test_an_identifier_anywhere_in_long_text_is_never_sent(self, capsys, service, position):
+        text = ("word " * 4000)[:position] + " buildbox01 " + "tail " * 100
+        run(capsys, "entry-type", "--text", text)
+        assert "buildbox01" not in json.dumps(service[0])
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "volume buildbox01-data is full",
+            "see my_buildbox01 for logs",
+            "path /srv/buildbox01/x and host buildbox01.",
+            "BUILDBOX01_backup failed",
+            "fqdn db.corp.example.org:5432 refused",
+            "url https://buildbox01:8443/x",
+        ],
+    )
+    def test_identifiers_joined_by_punctuation_are_masked(self, capsys, service, text):
+        run(capsys, "entry-type", "--text", text)
+        wire = json.dumps(service[0]).lower()
+        assert "buildbox01" not in wire and "corp.example.org" not in wire
+
+    def test_an_identifier_inside_a_longer_word_is_left_alone(self, capsys, service):
+        run(capsys, "entry-type", "--text", "the rebuildbox012 tool")
+        assert "rebuildbox012" in service[0]["state"]["entry"]
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            ".".join(["10", "1", "2", "3"]),
+            ".".join(["172", "20", "0", "9"]),
+            ".".join(["100", "64", "1", "2"]),
+            ".".join(["100", "127", "250", "1"]),
+            ".".join(["169", "254", "10", "10"]),
+            "fd" + "12:3456:789a::1",
+            "fe" + "80::1ff:fe23:4567:890a",
+            "FC" + "00::1",
+        ],
+    )
+    def test_private_addresses_of_every_family_are_masked(self, capsys, service, address):
+        run(capsys, "entry-type", "--text", f"cannot reach {address} from here")
+        assert address not in json.dumps(service[0])
+        assert "address-1" in service[0]["state"]["entry"]
+
+    @pytest.mark.parametrize("address", ["8.8.8.8", "100.63.0.1", "100.128.0.1", "2001:db8::1", "version 10.3.3"])
+    def test_public_addresses_and_version_numbers_are_left_alone(self, capsys, service, address):
+        run(capsys, "entry-type", "--text", f"probe to {address} failed")
+        assert address in service[0]["state"]["entry"]
 
 
 @pytest.mark.usefixtures("enabled")

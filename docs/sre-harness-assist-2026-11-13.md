@@ -31,9 +31,18 @@ final severity. See ADR 0012.
   `{"available": false, "reason": …}` and exit 0.
 - **On the record.** Each call during an incident is written to the audit log.
 
+## Found in review
+
+An automated security review of the first push found two ways masking could be bypassed. Both were valid.
+
+| Finding | Change |
+|---|---|
+| An identifier joined to other text by `-` or `_` was not masked; IPv6 private and CGNAT addresses were not covered | An identifier is masked wherever it is not part of a longer run of letters and digits; unique-local and link-local IPv6, CGNAT and IPv4 link-local are masked |
+| Text was cut and redacted before masking, and a long string had a hash of its unmasked original appended | Masking runs first, over everything that could be sent; then redaction; then a plain cut. Nothing derived from the original is added |
+
 ## Verification
 
-- 285 tests pass; ruff clean; pylint exit 0. The service call is replaced in
+- 310 tests pass; ruff clean; pylint exit 0. The service call is replaced in
   tests; nothing leaves the machine.
 - Live, with generic made-up text: an outage for all customers gave P1 (1.0);
   one slow dashboard for one user gave P4 (0.92); "deleted the stuck pod …
