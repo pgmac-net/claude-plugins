@@ -258,7 +258,7 @@
         },
         "assist": {
           "type": "object",
-          "description": "Optional advisory helper. It never approves, blocks or selects an action.",
+          "description": "Optional advisory helper. It suggests; it never approves, blocks or selects an action, never decides a tier, and never sets a final severity. Enabling it sends masked incident text to a third party.",
           "additionalProperties": false,
           "required": [
             "provider",
@@ -275,6 +275,20 @@
             },
             "api_key_env": {
               "$ref": "#/$defs/envVarName"
+            },
+            "model": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "description": "Model id to pin. Pinning is recommended: an alias can change answers between releases."
+            },
+            "mask_file": {
+              "type": "string",
+              "description": "File of site identifiers, one per line, relative to the site root. Each is replaced with a placeholder before anything is sent."
+            },
+            "timeout_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
             }
           }
         },

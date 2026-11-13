@@ -1,7 +1,7 @@
 ---
 name: start-incident
 description: This skill should be used when the user says "start an incident", "we have an incident", "incident on <host or service>", "something's down", "run an incident drill", reports a live production problem, or asks for a handover or summary of an incident in progress. Takes a free-text description of the problem and drives triage, diagnosis and gated recovery, keeping a typed timeline that the create-pir skill consumes once the incident is resolved.
-version: 0.5.0
+version: 0.6.0
 ---
 
 # Start Incident
@@ -86,6 +86,10 @@ If `due` is true, post an `update` entry now: current state, what changed since 
 
 **Handover**, when the user asks or someone else takes over: `timeline.py handover` with its five fields. **Summary**, on request: read `timeline.py export`, then post a `summary` entry in your own words.
 
+## A second opinion, if the site has one
+
+Some sites enable an advisory helper for three questions: a severity suggestion, a ranking of runbooks to read, and a timeline entry's type. It advises only; it never approves or selects anything. If it says `"available": false`, carry on without it. When and how: `references/assist.md`.
+
 ## The audit log
 
 A hook records every tool call you make while the incident is open; you do not write it. You add only what it cannot know: approvals and denials. If your agent has no hooks, you record commands yourself. All of it: `references/audit-log.md`.
@@ -102,6 +106,7 @@ A hook records every tool call you make while the incident is open; you do not w
 
 - `references/triage-stance.md` — stabilise versus diagnose, sizing blast radius, when to stop and hand a decision to the person
 - `references/incident-record.md` — the tracking issue, entry types, handover and summary formats, script usage
+- `references/assist.md` — the advisory helper: when to ask, what it must never decide, what leaves the machine
 - `references/autonomy.md` — pre-approved actions: how the match works, what to do with each answer
 - `references/audit-log.md` — what the hook captures, recording approvals, verifying and committing the log
 - `references/catalog-in-an-incident.md` — using the catalog to find what is affected and what to read

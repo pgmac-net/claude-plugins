@@ -34,7 +34,7 @@ The output gives `site_root`. After a valid result, read `<site_root>/site.yaml`
 | `catalog` | Catalog directory, default owner, runbooks repository, and the sources the generated layer is built from |
 | `patterns_path` | Deployment pattern pages |
 | `audit` | Repository alias and directory for audit logs. Must be private |
-| `incident` | Time zone, severity criteria, status-update intervals, site procedures per stage, evidence directory, drill tracker |
+| `incident` | Time zone, severity criteria, status-update intervals, site procedures per stage, evidence directory, drill tracker, the pre-approved action list, and the optional advisory helper |
 | `chat`, `slo` | Reserved; must be empty |
 
 Schemas: `<plugin root>/schemas/site.schema.json` (version 2), `tiers.schema.json`, `entity.schema.json`. Unknown keys are errors.

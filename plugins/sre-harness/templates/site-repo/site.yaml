@@ -97,6 +97,15 @@ incident:
   evidence_dir: ~/incident-evidence
   # Allow-list of pre-approved (Tier 2) actions. Empty and switched off until you add to it.
   autonomy_file: autonomy.yaml
+  # Optional advisory helper: a judgment model that suggests a severity, ranks
+  # runbooks and types timeline entries. It never decides anything. Enabling it
+  # sends masked incident text to a third party. Off unless you add this:
+  # assist:
+  #   provider: jev
+  #   enabled: true
+  #   api_key_env: TYPESAFE_API_KEY
+  #   mask_file: site-identifiers.txt
+  #   model: <pin a model id>
   # Practice incidents are tracked here, never in a public repository.
   drill:
     repo: catalog

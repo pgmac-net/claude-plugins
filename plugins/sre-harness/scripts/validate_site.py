@@ -122,6 +122,16 @@ def check_paths(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], list[s
     return errors, warnings
 
 
+def _assist_problems(site_root: Path, assist: dict[str, Any]) -> list[str]:
+    """What is wrong with the advisory helper's settings."""
+    problems = []
+    if assist.get("enabled") and not assist.get("api_key_env"):
+        problems.append("incident/assist: enabled but no api_key_env names where the key is held")
+    if assist.get("mask_file") and not (site_root / assist["mask_file"]).is_file():
+        problems.append(f"incident/assist/mask_file: {assist['mask_file']} does not exist in the site repository")
+    return problems
+
+
 def check_incident(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
     """The incident section must name a real time zone, existing procedures and a private drill tracker."""
     errors = []
@@ -158,8 +168,7 @@ def check_incident(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dic
     if autonomy_file and not (site_root / autonomy_file).is_file():
         errors.append(f"incident/autonomy_file: {autonomy_file} does not exist in the site repository")
     assist = incident.get("assist")
-    if assist and assist["enabled"] and not assist.get("api_key_env"):
-        errors.append("incident/assist: enabled but no api_key_env names where the key is held")
+    errors.extend(_assist_problems(site_root, assist or {}))
 
     summary = {
         "timezone": incident.get("timezone"),

@@ -2,7 +2,7 @@
 
 A portable harness for doing SRE work with an LLM agent: service catalog, incident triage and remediation, audit, user journeys and SLOs.
 
-So far it has: how a site is described and checked, a service catalog kept in step with the site's own repositories, incident skills that keep a typed timeline, a hook-captured audit log, and autonomy tiers with a pre-approved action list. SLO skills arrive in later releases.
+So far it has: how a site is described and checked, a service catalog kept in step with the site's own repositories, incident skills that keep a typed timeline, a hook-captured audit log, autonomy tiers with a pre-approved action list, and an optional advisory helper. SLO skills arrive in later releases.
 
 ## How it is put together
 
@@ -98,6 +98,16 @@ uv run scripts/autonomy.py run   --command "<exact command>" --service component
 
 A script decides, by token-for-token match, and the same script executes the command as an argument list with no shell; the agent never types a pre-approved command into a shell. Commands are confined to letters, digits, `. _ : / = @ , + -` and single spaces, so there is nothing for a shell to read differently. The list is empty and switched off by default, and `run` refuses during a drill. Afterwards, `audit.py verify` reports every mutating shell command that ran with no approval for that exact command; that detection is pattern-based. See [ADR 0011](docs/adr/0011-tier-two-is-an-exact-match-allow-list.md).
 
+**Advisory helper.** Optional and off by default. When a site enables it (`incident.assist`), a fast judgment model gives a second opinion on three questions: severity, which runbooks to read, and a timeline entry's type.
+
+```bash
+uv run scripts/assist.py severity --impact "<what is broken, for whom>"
+uv run scripts/assist.py runbooks --symptoms "<what is observed>"
+uv run scripts/assist.py entry-type --text "<entry text>"
+```
+
+It only advises: it never approves, blocks or selects an action, never decides a tier, never sets a final severity. Enabling it sends text to a third party; secrets are redacted and site identifiers and private addresses are masked first, and nothing is sent if the configured mask file is missing. With no key, a timeout or an error it reports itself unavailable and the incident carries on. See [ADR 0012](docs/adr/0012-the-judgment-model-only-advises.md).
+
 **Site procedures.** The skills say *when*; the site says *how*. `site.yaml` lists procedure files per stage (`triage`, `evidence`, `comms`, `review`) under `incident.procedures`, and the skills read them at that stage. This is where monitoring access, fallbacks, evidence capture and review format live. See [ADR 0010](docs/adr/0010-site-procedures-carry-the-how.md).
 
 **Drills.** `--drill` tracks a practice incident in the private repository named by `incident.drill`, so nothing fake is published. A drill never mutates anything.
@@ -122,6 +132,7 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 | `hooks/hooks.json`, `scripts/audit_hook.py` | The audit hook: captures tool calls during an incident |
 | `scripts/audit.py` | Explicit audit records, verification, commit to the audit location |
 | `scripts/autonomy.py` | Decides whether a command is a pre-approved action, and executes it without a shell |
+| `scripts/assist.py` | Optional advisory second opinions from a judgment model, with masking |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
 | `templates/site-repo/` | Starter layout for a new site repository |

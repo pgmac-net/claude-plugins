@@ -194,17 +194,7 @@ def decide(allow: dict[str, Any], command: str, service: str | None, incident_id
 
 def record(incident_id: str, event: str, **fields: Any) -> None:
     """Append one self-reported record about a Tier 2 action."""
-    audit_hook.append(
-        incident_id,
-        {
-            "v": 1,
-            "ts": sre_common.iso_utc(sre_common.utc_now()),
-            "incident": incident_id,
-            "capture": "self-reported",
-            "event": event,
-            **fields,
-        },
-    )
+    audit_hook.self_report(incident_id, event, **fields)
 
 
 def cmd_match(args: argparse.Namespace, allow: dict[str, Any], incident_id: str | None) -> int:
