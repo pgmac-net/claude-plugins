@@ -100,15 +100,20 @@ def env_secrets(env: dict[str, str] | None = None, extra_names: list[str] | None
     return found
 
 
-def redact_text(text: str, env_values: dict[str, str] | None = None) -> str:
+def redact_text(
+    text: str, env_values: dict[str, str] | None = None, limit: int | None = MAX_STRING, digest: bool = True
+) -> str:
     """Replace anything secret-shaped in a string.
 
     The string is cut to MAX_SCAN before any pattern runs, so the cost is
-    bounded whatever the input, then shortened to MAX_STRING for storage. The
-    digest is of the original, so a cut string can still be identified.
+    bounded whatever the input. With a limit it is then shortened for storage,
+    and by default a digest of the original is appended so a cut string can
+    still be identified. Pass digest=False when the result leaves the machine:
+    a hash of the original text is information about it.
     """
     original_length = len(text)
-    digest = hashlib.sha256(text.encode()).hexdigest() if original_length > MAX_STRING else ""
+    over = limit is not None and original_length > limit
+    digest_value = hashlib.sha256(text.encode()).hexdigest() if over and digest else ""
     text = text[:MAX_SCAN]
     # Each redaction is parked behind a marker no pattern can produce, so a later
     # pattern never chews on an earlier pattern's replacement.
@@ -132,8 +137,10 @@ def redact_text(text: str, env_values: dict[str, str] | None = None) -> str:
     for label, pattern in SECRET_PATTERNS:
         text = pattern.sub(lambda match, lab=label: replace(match, lab), text)
     text = _PARKED.sub(lambda match: parked[int(match.group(1))], text)
-    if original_length > MAX_STRING:
-        text = f"{text[:MAX_STRING]}…[truncated; original {original_length} chars, sha256 {digest}]"
+    if over:
+        text = text[:limit]
+        if digest:
+            text = f"{text}…[truncated; original {original_length} chars, sha256 {digest_value}]"
     return text
 
 

@@ -160,6 +160,21 @@ def append(incident_id: str, record: dict[str, Any]) -> None:
         handle.write((json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
+def self_report(incident_id: str, event: str, **fields: Any) -> None:
+    """Append a record written by a harness script rather than captured from a tool call."""
+    append(
+        incident_id,
+        {
+            "v": 1,
+            "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "incident": incident_id,
+            "capture": "self-reported",
+            "event": event,
+            **fields,
+        },
+    )
+
+
 def head(incident_id: str) -> tuple[int, str] | None:
     """(record count, hash of the last line) of an incident's log, or None if it has none."""
     path = spool_path(incident_id)
