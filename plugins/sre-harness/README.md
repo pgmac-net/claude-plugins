@@ -108,6 +108,34 @@ uv run scripts/assist.py entry-type --text "<entry text>"
 
 It only advises: it never approves, blocks or selects an action, never decides a tier, never sets a final severity. Enabling it sends text to a third party; secrets are redacted and site identifiers and private addresses are masked first, and nothing is sent if the configured mask file is missing. With no key, a timeout or an error it reports itself unavailable and the incident carries on. See [ADR 0012](docs/adr/0012-the-judgment-model-only-advises.md).
 
+**Cleaning up local state.** During an incident the harness keeps files under `~/.local/state/sre-harness/` (or `$XDG_STATE_HOME/sre-harness/`): the audit spool, a `.closed` marker, the incident's state, session files and bind tokens. They are not removed when the audit log is committed, because the pull request has not merged yet.
+
+```bash
+uv run scripts/incident.py gc            # dry run: what would be cleared, and what is kept and why
+uv run scripts/incident.py gc --apply    # delete
+```
+
+An incident is cleared only when all of these hold:
+
+1. Its audit log was committed (the `.closed` marker exists) and it is resolved locally.
+2. The audit file on the audit repository's fetched default branch is **byte-identical** to the local spool. The check is the file itself, so a missed trigger leaves files behind and a wrong one cannot delete an unpreserved log.
+3. Its tracking issue is closed. (The open-time run cannot ask the code host, so it requires the log to have been committed at least 14 days ago instead.)
+
+An incident whose log was never committed is the only copy of its record: it is reported and never deleted. Deletion is never recursive, never follows a symlink, and only touches files whose names are incident ids inside the state directory. Unused bind tokens older than a week are removed too.
+
+Three triggers, all optional and all safe to miss:
+
+- **At `incident.py open`**: quiet, no network, never fails the open.
+- **On demand**: `incident.py gc`.
+- **A `post-merge` git hook** in the site repository, which runs `gc --apply` after a pull. It fires only when a pull happens on that machine, which is why it is a convenience and not the safety. Best effort: it always exits 0. Install it by **copying**, so a pull cannot change it:
+
+  ```bash
+  cp .githooks/post-merge "$(git rev-parse --git-path hooks)/post-merge"
+  git config sre-harness.plugin /path/to/plugins/sre-harness
+  ```
+
+  The plugin directory comes only from `SRE_HARNESS_PLUGIN` or that per-clone setting, never from a guess or from the repository's contents, and with neither set the hook does nothing. It runs `uv` from the plugin directory with `--no-config --no-project`, so a pulled `uv.toml` cannot influence it. Do not enable it with `core.hooksPath`: that runs whatever the last pull brought in. Re-copy it when you update the plugin and want a newer hook.
+
 **Site procedures.** The skills say *when*; the site says *how*. `site.yaml` lists procedure files per stage (`triage`, `evidence`, `comms`, `review`) under `incident.procedures`, and the skills read them at that stage. This is where monitoring access, fallbacks, evidence capture and review format live. See [ADR 0010](docs/adr/0010-site-procedures-carry-the-how.md).
 
 **Drills.** `--drill` tracks a practice incident in the private repository named by `incident.drill`, so nothing fake is published. A drill never mutates anything.

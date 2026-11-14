@@ -175,6 +175,34 @@ def self_report(incident_id: str, event: str, **fields: Any) -> None:
     )
 
 
+def capture_needed() -> bool:
+    """Whether the 'active' marker must stay: any incident still open, or about to start capturing.
+
+    True if a log is open (no .closed marker), if any incident's state says it is not resolved
+    (including one just opened that has no log yet), if a bind token is waiting to be used, or if
+    anything cannot be read. Only a clear 'nothing is live' lets the marker go.
+    """
+    state = state_dir()
+    for log in (state / "audit").glob("*.jsonl") if (state / "audit").is_dir() else []:
+        if not log.with_suffix(".closed").exists():
+            return True
+    for info in (state / "incidents").glob("*.json") if (state / "incidents").is_dir() else []:
+        try:
+            status = json.loads(info.read_text(encoding="utf-8")).get("status", "open")
+        except (OSError, ValueError, AttributeError):
+            return True
+        if status != "resolved":
+            return True
+    binds = state / "binds"
+    return binds.is_dir() and any(binds.iterdir())
+
+
+def release_active_marker() -> None:
+    """Drop the 'active' marker, but only when nothing is live, so capture survives a just-opened incident."""
+    if not capture_needed():
+        (state_dir() / "active").unlink(missing_ok=True)
+
+
 def head(incident_id: str) -> tuple[int, str] | None:
     """(record count, hash of the last line) of an incident's log, or None if it has none."""
     path = spool_path(incident_id)

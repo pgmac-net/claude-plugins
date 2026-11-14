@@ -349,12 +349,10 @@ def audit_checkout(doc: dict[str, Any], site_root: Path) -> Path:
 
 
 def release_capture(incident_id: str) -> None:
-    """Stop capture for this incident; drop the 'active' marker when no other log is still open."""
+    """Stop capture for this incident. The 'active' marker goes only when no other incident is live."""
     audit_dir = audit_hook.state_dir() / "audit"
     (audit_dir / f"{incident_id}.closed").write_text("committed\n", encoding="utf-8")
-    still_open = [p for p in audit_dir.glob("*.jsonl") if not p.with_suffix(".closed").exists()]
-    if not still_open:
-        (audit_hook.state_dir() / "active").unlink(missing_ok=True)
+    audit_hook.release_active_marker()
 
 
 def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, Any], site_root: Path) -> int:

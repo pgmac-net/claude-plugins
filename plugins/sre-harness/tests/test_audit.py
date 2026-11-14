@@ -315,6 +315,7 @@ class TestAuditCli:
                 "url": "u",
                 "title": "T",
                 "redact_env": [],
+                "status": "resolved",
             }
         )
         (state / "active").write_text("x\n", encoding="utf-8")
@@ -438,3 +439,60 @@ class TestHardening:
             timeline.parse(timeline.render("action", "x", moment, "Etc/UTC"), "2026-01-02T03:05:00Z", "o")["type"]
             == "action"
         )
+
+
+class TestActiveMarker:
+    """The marker switches capture on. It may go only when nothing is live or about to be."""
+
+    @pytest.fixture(autouse=True)
+    def _marker(self, state):
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "active").write_text("x\n", encoding="utf-8")
+
+    @property
+    def state(self):
+        return audit_hook.state_dir()
+
+    def write_state(self, incident_id: str, status: str) -> None:
+        sre_common.write_incident_state({"id": incident_id, "status": status}, make_current=False)
+
+    def test_it_goes_when_everything_is_resolved_and_committed(self):
+        self.write_state("incidents-1", "resolved")
+        audit_hook.release_active_marker()
+        assert not (self.state / "active").exists()
+
+    def test_it_stays_for_an_incident_just_opened_that_has_no_log_yet(self):
+        self.write_state("incidents-1", "resolved")
+        self.write_state("incidents-2", "open")
+        audit_hook.release_active_marker()
+        assert (self.state / "active").exists()
+
+    def test_it_stays_while_a_bind_token_waits_to_be_used(self):
+        self.write_state("incidents-1", "resolved")
+        (self.state / "binds").mkdir()
+        (self.state / "binds" / ("c" * 32)).write_text("incidents-2\n", encoding="utf-8")
+        audit_hook.release_active_marker()
+        assert (self.state / "active").exists()
+
+    def test_it_stays_while_a_log_is_open(self):
+        audit_hook.append("incidents-3", {"v": 1, "ts": "2026-01-02T03:04:05Z", "event": "note"})
+        audit_hook.release_active_marker()
+        assert (self.state / "active").exists()
+
+    def test_it_stays_when_a_state_file_cannot_be_read(self):
+        (self.state / "incidents").mkdir()
+        (self.state / "incidents" / "incidents-4.json").write_text("{not json", encoding="utf-8")
+        audit_hook.release_active_marker()
+        assert (self.state / "active").exists()
+
+    def test_a_state_without_a_status_counts_as_open(self):
+        sre_common.write_incident_state({"id": "incidents-5"}, make_current=False)
+        audit_hook.release_active_marker()
+        assert (self.state / "active").exists()
+
+    def test_committing_one_incident_does_not_switch_capture_off_for_another(self):
+        self.write_state("incidents-1", "resolved")
+        self.write_state("incidents-2", "open")
+        audit_hook.append("incidents-1", {"v": 1, "ts": "2026-01-02T03:04:05Z", "event": "note"})
+        audit.release_capture("incidents-1")
+        assert (self.state / "active").exists()
