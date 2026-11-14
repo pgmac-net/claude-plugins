@@ -196,12 +196,17 @@ def split_incident_id(incident_id: str, doc: dict[str, Any]) -> tuple[str, int]:
     return repo["repo"], number
 
 
-def run_gh(args: list[str], stdin: str | None = None) -> str:
+def run_gh(args: list[str], stdin: str | None = None, timeout: float | None = None) -> str:
     """Run the gh CLI and return its stdout. Raises SiteError with gh's own message on failure."""
     gh = shutil.which("gh")
     if not gh:
         raise SiteError("the gh CLI is not installed")
-    done = subprocess.run([gh, *args], input=stdin, capture_output=True, text=True, check=False)  # noqa: S603
+    try:
+        done = subprocess.run(  # noqa: S603
+            [gh, *args], input=stdin, capture_output=True, text=True, check=False, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SiteError(f"gh {' '.join(args[:2])} timed out after {timeout}s") from exc
     if done.returncode != 0:
         lines = done.stderr.strip().splitlines()
         raise SiteError(f"gh {' '.join(args[:2])} failed: {lines[-1] if lines else 'no output'}")

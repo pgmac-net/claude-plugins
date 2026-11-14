@@ -52,6 +52,10 @@ uv run <plugin root>/scripts/audit.py commit
 
 It verifies the chain, compares the log with the hashes pinned in the timeline, scans it once more for anything secret-shaped, copies the log to the site's private audit location on a branch `audit/<incident id>`, pushes, opens a pull request, and stops capture. It uses a temporary worktree and leaves the checkout as it found it. It refuses to commit a broken chain, a log that does not match its pinned hashes, or a log with a leftover secret. Report any of those to the person; do not work around them, and do not edit the log to make the check pass.
 
+## Afterwards: local state
+
+`audit.py commit` leaves the local spool in place, because its pull request has not merged. Once the audit pull request is merged and the tracking issue is closed, `incident.py gc --apply` removes it, but only if the file on the audit repository's default branch is byte-identical to the local copy. Run `incident.py gc` (a dry run) to see what would go and why anything is kept. Never delete files under the state directory by hand: `verify` reports tool calls that touch it, and an uncommitted log is the only copy.
+
 ## Limits to state honestly
 
 - **This is a record kept by a cooperating agent, not a tamper-proof one.** The log and the files that control capture belong to the same user the agent runs as. A process that set out to evade or rewrite them could. The hash chain, the hashes pinned in timeline comments and the state-directory report make accidents and after-the-fact edits visible. Shipping records off the machine as they are written is the control for a hostile process, and is not built yet.

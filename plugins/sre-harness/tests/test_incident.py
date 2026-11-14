@@ -23,7 +23,7 @@ class FakeGh:  # pylint: disable=too-few-public-methods
         self.next_number = 41
         self.title = "Old one"
 
-    def __call__(self, args, stdin=None):  # pylint: disable=too-many-return-statements
+    def __call__(self, args, stdin=None, timeout=None):  # pylint: disable=too-many-return-statements,unused-argument
         self.calls.append(args)
         verb = " ".join(args[:2])
         if verb == "issue list":

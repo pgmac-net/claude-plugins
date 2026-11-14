@@ -1,0 +1,29 @@
+#!/bin/sh
+# post-merge: clear local incident state whose audit log has now merged.
+#
+# Git runs this after a pull brings changes in. It is one trigger among three
+# (the others: `incident.py open`, which clears old state at the start of the
+# next incident, and `incident.py gc --apply` by hand). It is best effort and
+# never makes a pull fail: whatever happens here, it exits 0.
+#
+# What is deleted, and why that is safe, is decided by `incident.py gc`: only
+# an incident whose audit file on the fetched default branch is byte-identical
+# to the local copy, and whose tracking issue is closed. See the sre-harness
+# README, "Cleaning up local state".
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+#
+# The plugin directory comes from SRE_HARNESS_PLUGIN, or the newest copy in
+# Claude Code's plugin cache.
+
+plugin="${SRE_HARNESS_PLUGIN:-}"
+if [ -z "$plugin" ]; then
+    plugin=$(ls -d "$HOME"/.claude/plugins/cache/*/sre-harness/* 2>/dev/null | sort -V | tail -n 1)
+fi
+script="$plugin/scripts/incident.py"
+[ -n "$plugin" ] && [ -f "$script" ] || exit 0
+command -v uv >/dev/null 2>&1 || exit 0
+
+SRE_HARNESS_SITE=$(git rev-parse --show-toplevel) \
+    uv run "$script" gc --apply --no-fetch --quiet >/dev/null 2>&1 || true
+exit 0

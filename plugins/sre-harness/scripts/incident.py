@@ -15,6 +15,7 @@ Commands:
   status   show the current incident
   set      change severity, phase, affected scope, impact or runbook in the issue body
   close    mark the incident resolved locally and in the body; the issue stays open
+  gc       clear local state of incidents whose audit log has merged (dry run unless --apply)
 
 Exit codes: 0 ok, 2 the site or the code host could not be used, 3 open
 incidents already exist.
@@ -30,6 +31,7 @@ import sys
 from typing import Any
 
 import sre_common
+import state_gc
 from sre_common import SEVERITIES, SiteError, guarded, iso_utc, load_site, local_clock, split_incident_id, utc_now
 
 MARKER = "<!-- sre-harness:incident v1 -->"
@@ -127,6 +129,9 @@ def start_capture(state: dict[str, Any], doc: dict[str, Any]) -> None:
 
 
 def cmd_open(args: argparse.Namespace, doc: dict[str, Any]) -> int:
+    cleared = state_gc.auto_clean(doc, args.site_root)
+    if cleared:
+        print(f"Cleared local state of {cleared} earlier incident(s) whose audit log has merged.", file=sys.stderr)
     alias, repo, label = tracker(doc, args.drill)
     existing = open_incidents(repo, label)
     if existing and not args.new:
@@ -239,6 +244,19 @@ def cmd_close(args: argparse.Namespace, _doc: dict[str, Any]) -> int:
     return 0
 
 
+def cmd_gc(args: argparse.Namespace, doc: dict[str, Any]) -> int:
+    policy = state_gc.Policy(
+        require_issue_closed=not args.ignore_issue_state, fetch=not args.no_fetch, token_days=args.token_days
+    )
+    result = state_gc.run(doc, args.site_root, policy, apply=args.apply)
+    if args.quiet:
+        return 0
+    print(json.dumps(result, indent=2))
+    if result["dry_run"] and result["cleared"]:
+        print("Dry run: nothing was deleted. Run again with --apply to delete.", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--site", help="site repository path")
@@ -271,6 +289,14 @@ def build_parser() -> argparse.ArgumentParser:
     setter.add_argument("--runbook")
     setter.set_defaults(run=cmd_set)
 
+    gc = sub.add_parser("gc", help="clear local state of incidents whose audit log has merged")
+    gc.add_argument("--apply", action="store_true", help="delete; the default is a dry run")
+    gc.add_argument("--no-fetch", action="store_true", help="do not fetch the audit repository first")
+    gc.add_argument("--ignore-issue-state", action="store_true", help="do not require the tracking issue to be closed")
+    gc.add_argument("--token-days", type=int, default=7, help="age at which an unused bind token is removed")
+    gc.add_argument("--quiet", action="store_true", help="print nothing")
+    gc.set_defaults(run=cmd_gc)
+
     closer = sub.add_parser("close", help="mark the incident resolved")
     closer.add_argument("--incident")
     closer.set_defaults(run=cmd_close)
@@ -282,7 +308,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     def action() -> int:
-        _site_root, doc = load_site(args.site)
+        site_root, doc = load_site(args.site)
+        args.site_root = site_root
         return args.run(args, doc)
 
     return guarded(action)
