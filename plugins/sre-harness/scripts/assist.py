@@ -144,10 +144,14 @@ class Masker:
                 return OMITTED
             value = value[: breaks[-1]]
         value = redact.redact_text(value, self.env_values, limit=None, digest=False)
+        # Whole addresses first. A site may list an address prefix as an identifier to catch partial
+        # forms ("the 10.1.2 network"); if that ran first it would split a full address and leave the
+        # last octet behind.
+        value = PRIVATE_ADDRESS.sub(lambda match: self._placeholder("address", match.group(0)), value)
         for identifier in self.identifiers:
             pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(identifier)}(?![A-Za-z0-9])", re.IGNORECASE)
             value = pattern.sub(lambda match: self._placeholder("site", match.group(0)), value)
-        return PRIVATE_ADDRESS.sub(lambda match: self._placeholder("address", match.group(0)), value)
+        return value
 
     def node(self, node: Any) -> Any:
         """Mask every string in a JSON-like structure, keys included."""

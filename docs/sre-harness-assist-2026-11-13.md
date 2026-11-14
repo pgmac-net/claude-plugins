@@ -44,6 +44,11 @@ An automated security review of the first push found two ways masking could be b
 | (second review) Masking before redaction could change part of a secret and stop its pattern matching; a secret straddling the scan boundary could be partly sent | The order is now: cut first, back to the last whitespace so no token is split; redact everything that remains; mask last. Every character that can be sent has been scanned |
 | (third review) With no whitespace near the cut, the fallback still cut inside an unbroken run | The cut is always at whitespace of any kind; text with none to cut at is replaced by a placeholder and not sent |
 
+A later review, of the site change that enabled the helper, found a gap in the order:
+a site may list an address prefix (for partial forms such as "the 10.1.2 network"), and if
+identifiers were masked first the prefix split a whole address and left its last octet.
+Whole private addresses are now masked first, then identifiers.
+
 ## Verification
 
 - 328 tests pass; ruff clean; pylint exit 0. The service call is replaced in

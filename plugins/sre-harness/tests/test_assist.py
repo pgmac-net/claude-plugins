@@ -219,6 +219,25 @@ class TestMasking:
         wire = json.dumps(service[0]).lower()
         assert "buildbox01" not in wire and "corp.example.org" not in wire
 
+    @pytest.mark.parametrize(
+        ("template", "expected"),
+        [
+            ("host at {a}.57 is down", "host at address-1 is down"),
+            ("the {a} network is down", "the site-1 network is down"),
+            ("subnet {a}.0/24 lost its gateway", "subnet address-1/24 lost its gateway"),
+            ("hosts {a}.x are slow", "hosts site-1.x are slow"),
+            ("from {a}.57 to {a}.58", "from address-1 to address-2"),
+        ],
+    )
+    def test_an_address_prefix_in_the_mask_list_never_splits_a_whole_address(
+        self, enabled, capsys, service, template, expected
+    ):
+        prefix = ".".join(["172", "22", "22"])
+        with (enabled / "site-identifiers.txt").open("a", encoding="utf-8") as handle:
+            handle.write(prefix + "\n")
+        run(capsys, "entry-type", "--text", template.format(a=prefix))
+        assert service[0]["state"]["entry"] == expected
+
     def test_an_identifier_inside_a_longer_word_is_left_alone(self, capsys, service):
         run(capsys, "entry-type", "--text", "the rebuildbox012 tool")
         assert "rebuildbox012" in service[0]["state"]["entry"]
