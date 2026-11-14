@@ -44,6 +44,20 @@ An automated security review of the first push found two ways masking could be b
 | (second review) Masking before redaction could change part of a secret and stop its pattern matching; a secret straddling the scan boundary could be partly sent | The order is now: cut first, back to the last whitespace so no token is split; redact everything that remains; mask last. Every character that can be sent has been scanned |
 | (third review) With no whitespace near the cut, the fallback still cut inside an unbroken run | The cut is always at whitespace of any kind; text with none to cut at is replaced by a placeholder and not sent |
 
+A later review, of the site change that enabled the helper, found a gap in the order:
+a site may list an address prefix (for partial forms such as "the 10.1.2 network"), and if
+identifiers were masked first the prefix split a whole address and left its last octet.
+Masking addresses first, in turn, broke an identifier that itself contains an address
+(it was split, and its other half sent). Identifiers and addresses are now found together in
+the original text and replaced in one pass: where two overlap, the one that starts first
+wins, and of two that start together the longer wins. A full address beats a listed prefix
+of it, and an identifier containing an address is masked whole.
+
+A fourth review noted that a match overlapping an already-chosen one was dropped, so if an
+identifier ended inside an address or two identifiers overlapped, the dropped one's tail
+survived. Overlapping matches are now merged into one region, so no character of any of them
+is sent; the region is labelled by its longest member.
+
 ## Verification
 
 - 328 tests pass; ruff clean; pylint exit 0. The service call is replaced in

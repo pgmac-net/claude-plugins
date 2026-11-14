@@ -144,10 +144,44 @@ class Masker:
                 return OMITTED
             value = value[: breaks[-1]]
         value = redact.redact_text(value, self.env_values, limit=None, digest=False)
+        return self._mask_names(value)
+
+    def _mask_names(self, value: str) -> str:
+        """Replace identifiers and private addresses in one pass, so neither can break the other.
+
+        Every identifier and every private address is found in the original text, then all of them
+        are replaced at once. Where matches overlap they are merged into a single region, so a full
+        address under a listed prefix, an identifier that contains an address, and two identifiers
+        that overlap are each masked whole, with nothing left over. Placeholders are numbered in
+        order of appearance.
+        """
+        found: list[tuple[int, int, str]] = [
+            (match.start(), match.end(), "address") for match in PRIVATE_ADDRESS.finditer(value)
+        ]
         for identifier in self.identifiers:
             pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(identifier)}(?![A-Za-z0-9])", re.IGNORECASE)
-            value = pattern.sub(lambda match: self._placeholder("site", match.group(0)), value)
-        return PRIVATE_ADDRESS.sub(lambda match: self._placeholder("address", match.group(0)), value)
+            found.extend((match.start(), match.end(), "site") for match in pattern.finditer(value))
+        # Overlapping matches become one region covering all of them, so no character of any of
+        # them survives. Matches that merely touch stay separate. The region is labelled by its
+        # longest member: a full address under a listed prefix is an address, an identifier that
+        # contains an address is a site name.
+        regions: list[list[Any]] = []  # start, end, kind, length of the longest member
+        for start, end, kind in sorted(found):
+            if regions and start < regions[-1][1]:
+                region = regions[-1]
+                region[1] = max(region[1], end)
+                if end - start > region[3]:
+                    region[2], region[3] = kind, end - start
+            else:
+                regions.append([start, end, kind, end - start])
+        chosen = [(start, end, kind) for start, end, kind, _length in regions]
+        out, position = [], 0
+        for start, end, kind in chosen:
+            out.append(value[position:start])
+            out.append(self._placeholder(kind, value[start:end]))
+            position = end
+        out.append(value[position:])
+        return "".join(out)
 
     def node(self, node: Any) -> Any:
         """Mask every string in a JSON-like structure, keys included."""
