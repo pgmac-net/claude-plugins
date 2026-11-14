@@ -11,19 +11,29 @@
 # to the local copy, and whose tracking issue is closed. See the sre-harness
 # README, "Cleaning up local state".
 #
-# Enable once per clone:   git config core.hooksPath .githooks
+# INSTALL by copying, not by pointing git at the repository's own directory:
 #
-# The plugin directory comes from SRE_HARNESS_PLUGIN, or the newest copy in
-# Claude Code's plugin cache.
+#     cp .githooks/post-merge "$(git rev-parse --git-path hooks)/post-merge"
+#     git config sre-harness.plugin /path/to/plugins/sre-harness
+#
+# A copy in .git/hooks cannot be changed by a pull. A hook run straight from the
+# tracked directory (core.hooksPath) executes whatever the last pull brought in.
+# Re-copy it when you update the plugin and want a newer hook.
+#
+# The plugin directory is read only from SRE_HARNESS_PLUGIN or the per-clone
+# `sre-harness.plugin` setting above, never guessed, and never taken from the
+# repository's contents. With neither set, the hook does nothing.
 
-plugin="${SRE_HARNESS_PLUGIN:-}"
-if [ -z "$plugin" ]; then
-    plugin=$(ls -d "$HOME"/.claude/plugins/cache/*/sre-harness/* 2>/dev/null | sort -V | tail -n 1)
-fi
+plugin="${SRE_HARNESS_PLUGIN:-$(git config --get sre-harness.plugin 2>/dev/null)}"
 script="$plugin/scripts/incident.py"
 [ -n "$plugin" ] && [ -f "$script" ] || exit 0
 command -v uv >/dev/null 2>&1 || exit 0
+site=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 
-SRE_HARNESS_SITE=$(git rev-parse --show-toplevel) \
-    uv run "$script" gc --apply --no-fetch --quiet >/dev/null 2>&1 || true
+# Run from the plugin directory, ignoring any uv configuration: the repository's
+# own files (uv.toml, pyproject.toml) must not influence what runs.
+(
+    cd "$plugin" &&
+        SRE_HARNESS_SITE="$site" uv run --no-config --no-project "$script" gc --apply --no-fetch --quiet
+) >/dev/null 2>&1 || true
 exit 0

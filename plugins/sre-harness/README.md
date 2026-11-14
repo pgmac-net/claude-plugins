@@ -127,7 +127,14 @@ Three triggers, all optional and all safe to miss:
 
 - **At `incident.py open`**: quiet, no network, never fails the open.
 - **On demand**: `incident.py gc`.
-- **A `post-merge` git hook** in the site repository, which runs `gc --apply` after a pull. The template ships it in `templates/site-repo/.githooks/`; enable it once per clone with `git config core.hooksPath .githooks`. It is best effort and always exits 0. It fires only when a pull happens on that machine, which is why it is a convenience and not the safety.
+- **A `post-merge` git hook** in the site repository, which runs `gc --apply` after a pull. It fires only when a pull happens on that machine, which is why it is a convenience and not the safety. Best effort: it always exits 0. Install it by **copying**, so a pull cannot change it:
+
+  ```bash
+  cp .githooks/post-merge "$(git rev-parse --git-path hooks)/post-merge"
+  git config sre-harness.plugin /path/to/plugins/sre-harness
+  ```
+
+  The plugin directory comes only from `SRE_HARNESS_PLUGIN` or that per-clone setting, never from a guess or from the repository's contents, and with neither set the hook does nothing. It runs `uv` from the plugin directory with `--no-config --no-project`, so a pulled `uv.toml` cannot influence it. Do not enable it with `core.hooksPath`: that runs whatever the last pull brought in. Re-copy it when you update the plugin and want a newer hook.
 
 **Site procedures.** The skills say *when*; the site says *how*. `site.yaml` lists procedure files per stage (`triage`, `evidence`, `comms`, `review`) under `incident.procedures`, and the skills read them at that stage. This is where monitoring access, fallbacks, evidence capture and review format live. See [ADR 0010](docs/adr/0010-site-procedures-carry-the-how.md).
 

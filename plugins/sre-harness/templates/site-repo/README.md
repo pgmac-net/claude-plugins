@@ -10,7 +10,7 @@ one site.
 | `catalog/` | Service catalog: generated Resources and hand-written services |
 | `patterns/` | Deployment pattern pages |
 | `autonomy.yaml` | Allow-list of pre-approved (Tier 2) actions. Empty by default |
-| `.githooks/post-merge` | Optional: clears local incident state after a pull once the audit log has merged. Enable with `git config core.hooksPath .githooks` |
+| `.githooks/post-merge` | Optional: clears local incident state after a pull once the audit log has merged. Install by copying it into `.git/hooks` (see the file's header), not with `core.hooksPath` |
 | `procedures/` | How incidents are worked here: monitoring access, evidence, comms, review format |
 | `audit/` | Per-incident audit logs |
 | `docs/adr/` | Site decisions |

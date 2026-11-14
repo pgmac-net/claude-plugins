@@ -236,11 +236,7 @@ def run(doc: dict[str, Any], site_root: Path, policy: Policy, apply: bool) -> di
     if apply:
         for path in [*(Path(p) for p in sorted(listed)), *tokens]:
             deleted += _remove(path, state)
-        audit_dir = state / "audit"
-        logs = audit_dir.glob("*.jsonl") if audit_dir.is_dir() else []
-        open_logs = [p for p in logs if not p.with_suffix(".closed").exists()]
-        if not open_logs:
-            (state / "active").unlink(missing_ok=True)
+        audit_hook.release_active_marker()
     return {
         "dry_run": not apply,
         "cleared": [v["id"] for v in cleared],

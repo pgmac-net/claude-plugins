@@ -223,6 +223,17 @@ class TestFilesAndPointers:
         run_gc(world)
         assert (world.state / "active").exists()
 
+    def test_clearing_an_old_incident_does_not_stop_capture_for_a_new_one(self, world):
+        done = world.incident(7)
+        world.merge_audit(done)
+        world.issues[7] = "CLOSED"
+        sre_common.write_incident_state(
+            {"id": "incidents-9", "repo": "example-org/incidents", "number": 9, "status": "open"}, make_current=False
+        )
+        (world.state / "active").write_text("x\n", encoding="utf-8")
+        assert run_gc(world)["cleared"] == [done]
+        assert (world.state / "active").exists(), "incident 9 has just opened and its log has not started"
+
     def test_unused_bind_tokens_expire(self, world):
         binds = world.state / "binds"
         binds.mkdir(parents=True)
