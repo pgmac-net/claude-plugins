@@ -53,6 +53,11 @@ the original text and replaced in one pass: where two overlap, the one that star
 wins, and of two that start together the longer wins. A full address beats a listed prefix
 of it, and an identifier containing an address is masked whole.
 
+A fourth review noted that a match overlapping an already-chosen one was dropped, so if an
+identifier ended inside an address or two identifiers overlapped, the dropped one's tail
+survived. Overlapping matches are now merged into one region, so no character of any of them
+is sent; the region is labelled by its longest member.
+
 ## Verification
 
 - 328 tests pass; ruff clean; pylint exit 0. The service call is replaced in

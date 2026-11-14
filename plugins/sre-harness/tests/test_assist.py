@@ -219,6 +219,15 @@ class TestMasking:
         wire = json.dumps(service[0]).lower()
         assert "buildbox01" not in wire and "corp.example.org" not in wire
 
+    def test_an_identifier_inside_a_longer_word_is_left_alone(self, capsys, service):
+        run(capsys, "entry-type", "--text", "the rebuildbox012 tool")
+        assert "rebuildbox012" in service[0]["state"]["entry"]
+
+
+@pytest.mark.usefixtures("enabled")
+class TestAddressMasking:
+    """Whole addresses, address prefixes and overlapping matches."""
+
     @pytest.mark.parametrize(
         ("template", "expected"),
         [
@@ -247,13 +256,41 @@ class TestMasking:
         run(capsys, "entry-type", "--text", f"{gateway} dropped; also {other} and {gateway} again")
         assert service[0]["state"]["entry"] == "site-1 dropped; also address-1 and site-1 again"
 
+    def test_an_identifier_ending_inside_an_address_leaves_no_tail(self, enabled, capsys, service):
+        address = ".".join(["10", "1", "2", "3"])
+        with (enabled / "site-identifiers.txt").open("a", encoding="utf-8") as handle:
+            handle.write("gw-10.1\n")
+        run(capsys, "entry-type", "--text", f"link gw-{address} is down")
+        sent = service[0]["state"]["entry"]
+        assert sent in ("link site-1 is down", "link address-1 is down"), "one placeholder, nothing left over"
+        assert "gw" not in sent and "10" not in sent
+
+    def test_an_identifier_starting_inside_an_address_leaves_no_head(self, enabled, capsys, service):
+        address = ".".join(["10", "1", "2", "3"])
+        with (enabled / "site-identifiers.txt").open("a", encoding="utf-8") as handle:
+            handle.write("2.3-edge\n")
+        run(capsys, "entry-type", "--text", f"{address}-edge is down")
+        sent = service[0]["state"]["entry"]
+        assert sent in ("site-1 is down", "address-1 is down"), "one placeholder, nothing left over"
+        assert "edge" not in sent and "10" not in sent
+
+    def test_overlapping_identifiers_are_masked_as_one_region(self, enabled, capsys, service):
+        with (enabled / "site-identifiers.txt").open("a", encoding="utf-8") as handle:
+            handle.write("alpha-beta\nbeta-gamma\n")
+        run(capsys, "entry-type", "--text", "alpha-beta-gamma failed; beta-gamma alone; alpha-beta alone")
+        sent = service[0]["state"]["entry"]
+        assert "alpha" not in sent and "beta" not in sent and "gamma" not in sent
+        assert sent.startswith("site-1 failed; site-")
+
+    def test_matches_that_only_touch_stay_separate(self, enabled, capsys, service):
+        with (enabled / "site-identifiers.txt").open("a", encoding="utf-8") as handle:
+            handle.write("alpha\nbeta\n")
+        run(capsys, "entry-type", "--text", "alpha beta")
+        assert service[0]["state"]["entry"] == "site-1 site-2"
+
     def test_placeholders_are_numbered_in_order_of_appearance(self, capsys, service):
         run(capsys, "entry-type", "--text", f"buildbox01 then {PRIVATE_IP} then corp.example.org")
         assert service[0]["state"]["entry"] == "site-1 then address-1 then site-2"
-
-    def test_an_identifier_inside_a_longer_word_is_left_alone(self, capsys, service):
-        run(capsys, "entry-type", "--text", "the rebuildbox012 tool")
-        assert "rebuildbox012" in service[0]["state"]["entry"]
 
     @pytest.mark.parametrize(
         "address",

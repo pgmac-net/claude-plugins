@@ -149,10 +149,11 @@ class Masker:
     def _mask_names(self, value: str) -> str:
         """Replace identifiers and private addresses in one pass, so neither can break the other.
 
-        Every identifier and every private address is found in the original text. Where two
-        overlap, the one that starts first wins, and of two that start together the longer wins.
-        So a full address beats a listed prefix of it, and an identifier that contains an address
-        is masked whole rather than split. Placeholders are numbered in order of appearance.
+        Every identifier and every private address is found in the original text, then all of them
+        are replaced at once. Where matches overlap they are merged into a single region, so a full
+        address under a listed prefix, an identifier that contains an address, and two identifiers
+        that overlap are each masked whole, with nothing left over. Placeholders are numbered in
+        order of appearance.
         """
         found: list[tuple[int, int, str]] = [
             (match.start(), match.end(), "address") for match in PRIVATE_ADDRESS.finditer(value)
@@ -160,10 +161,20 @@ class Masker:
         for identifier in self.identifiers:
             pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(identifier)}(?![A-Za-z0-9])", re.IGNORECASE)
             found.extend((match.start(), match.end(), "site") for match in pattern.finditer(value))
-        chosen: list[tuple[int, int, str]] = []
-        for start, end, kind in sorted(found, key=lambda item: (item[0], -(item[1] - item[0]))):
-            if not chosen or start >= chosen[-1][1]:
-                chosen.append((start, end, kind))
+        # Overlapping matches become one region covering all of them, so no character of any of
+        # them survives. Matches that merely touch stay separate. The region is labelled by its
+        # longest member: a full address under a listed prefix is an address, an identifier that
+        # contains an address is a site name.
+        regions: list[list[Any]] = []  # start, end, kind, length of the longest member
+        for start, end, kind in sorted(found):
+            if regions and start < regions[-1][1]:
+                region = regions[-1]
+                region[1] = max(region[1], end)
+                if end - start > region[3]:
+                    region[2], region[3] = kind, end - start
+            else:
+                regions.append([start, end, kind, end - start])
+        chosen = [(start, end, kind) for start, end, kind, _length in regions]
         out, position = [], 0
         for start, end, kind in chosen:
             out.append(value[position:start])
