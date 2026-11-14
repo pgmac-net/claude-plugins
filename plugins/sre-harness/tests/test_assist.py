@@ -116,8 +116,8 @@ class TestMasking:
         for secret in ("buildbox01", "BuildBox01", "corp.example.org", PRIVATE_IP, token):
             assert secret not in wire
         sent_impact = service[0]["state"]["impact"]
-        assert sent_impact == "site-2 at address-1 cannot reach db.site-1; token [REDACTED:GitHub token]; site-2 again"
-        assert service[0]["state"]["affected"] == "site-2", "the same identifier keeps one placeholder"
+        assert sent_impact == "site-1 at address-1 cannot reach db.site-2; token [REDACTED:GitHub token]; site-1 again"
+        assert service[0]["state"]["affected"] == "site-1", "the same identifier keeps one placeholder"
 
     def test_runbook_text_is_masked_and_file_names_are_not_sent(self, capsys, service):
         run(capsys, "runbooks", "--symptoms", "names do not resolve")
@@ -237,6 +237,19 @@ class TestMasking:
             handle.write(prefix + "\n")
         run(capsys, "entry-type", "--text", template.format(a=prefix))
         assert service[0]["state"]["entry"] == expected
+
+    def test_an_identifier_that_contains_an_address_is_masked_whole(self, enabled, capsys, service):
+        address = ".".join(["10", "1", "2", "3"])
+        other = ".".join(["10", "1", "2", "4"])
+        gateway = f"gw-{address}"
+        with (enabled / "site-identifiers.txt").open("a", encoding="utf-8") as handle:
+            handle.write(gateway + "\n")
+        run(capsys, "entry-type", "--text", f"{gateway} dropped; also {other} and {gateway} again")
+        assert service[0]["state"]["entry"] == "site-1 dropped; also address-1 and site-1 again"
+
+    def test_placeholders_are_numbered_in_order_of_appearance(self, capsys, service):
+        run(capsys, "entry-type", "--text", f"buildbox01 then {PRIVATE_IP} then corp.example.org")
+        assert service[0]["state"]["entry"] == "site-1 then address-1 then site-2"
 
     def test_an_identifier_inside_a_longer_word_is_left_alone(self, capsys, service):
         run(capsys, "entry-type", "--text", "the rebuildbox012 tool")

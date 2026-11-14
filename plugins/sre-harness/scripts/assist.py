@@ -144,14 +144,33 @@ class Masker:
                 return OMITTED
             value = value[: breaks[-1]]
         value = redact.redact_text(value, self.env_values, limit=None, digest=False)
-        # Whole addresses first. A site may list an address prefix as an identifier to catch partial
-        # forms ("the 10.1.2 network"); if that ran first it would split a full address and leave the
-        # last octet behind.
-        value = PRIVATE_ADDRESS.sub(lambda match: self._placeholder("address", match.group(0)), value)
+        return self._mask_names(value)
+
+    def _mask_names(self, value: str) -> str:
+        """Replace identifiers and private addresses in one pass, so neither can break the other.
+
+        Every identifier and every private address is found in the original text. Where two
+        overlap, the one that starts first wins, and of two that start together the longer wins.
+        So a full address beats a listed prefix of it, and an identifier that contains an address
+        is masked whole rather than split. Placeholders are numbered in order of appearance.
+        """
+        found: list[tuple[int, int, str]] = [
+            (match.start(), match.end(), "address") for match in PRIVATE_ADDRESS.finditer(value)
+        ]
         for identifier in self.identifiers:
             pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(identifier)}(?![A-Za-z0-9])", re.IGNORECASE)
-            value = pattern.sub(lambda match: self._placeholder("site", match.group(0)), value)
-        return value
+            found.extend((match.start(), match.end(), "site") for match in pattern.finditer(value))
+        chosen: list[tuple[int, int, str]] = []
+        for start, end, kind in sorted(found, key=lambda item: (item[0], -(item[1] - item[0]))):
+            if not chosen or start >= chosen[-1][1]:
+                chosen.append((start, end, kind))
+        out, position = [], 0
+        for start, end, kind in chosen:
+            out.append(value[position:start])
+            out.append(self._placeholder(kind, value[start:end]))
+            position = end
+        out.append(value[position:])
+        return "".join(out)
 
     def node(self, node: Any) -> Any:
         """Mask every string in a JSON-like structure, keys included."""

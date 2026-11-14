@@ -47,7 +47,11 @@ An automated security review of the first push found two ways masking could be b
 A later review, of the site change that enabled the helper, found a gap in the order:
 a site may list an address prefix (for partial forms such as "the 10.1.2 network"), and if
 identifiers were masked first the prefix split a whole address and left its last octet.
-Whole private addresses are now masked first, then identifiers.
+Masking addresses first, in turn, broke an identifier that itself contains an address
+(it was split, and its other half sent). Identifiers and addresses are now found together in
+the original text and replaced in one pass: where two overlap, the one that starts first
+wins, and of two that start together the longer wins. A full address beats a listed prefix
+of it, and an identifier containing an address is masked whole.
 
 ## Verification
 
