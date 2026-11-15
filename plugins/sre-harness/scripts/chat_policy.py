@@ -177,6 +177,15 @@ WRAPPERS = frozenset(
         "make",
     }
 )
+# Programs whose options a prefix rule cannot constrain: options that redirect the
+# credential, act as another identity, or read and write any file.
+NEEDS_ARGUMENT_CHECKS = {
+    "kubectl": "use kube_read.py, which checks each option",
+    "oc": "its options can send the credential to another server",
+    "helm": "its options can send the credential to another server",
+    "git": "some of its options read or write any file",
+    "journalctl": "some of its options read any file or change state",
+}
 INTERPRETER = re.compile(r"^python[0-9.]*$")
 REMOTE_SHELLS = frozenset({"ssh", "mosh"})
 
@@ -234,6 +243,10 @@ def _bash_prefix_problem(prefix: str, wildcard: bool) -> str | None:
         (
             words[0] in WRAPPERS or bool(INTERPRETER.fullmatch(words[0])),
             f"'{words[0]}' runs other commands; allowing it would allow anything",
+        ),
+        (
+            words[0] in NEEDS_ARGUMENT_CHECKS,
+            f"a '{words[0]}' prefix cannot constrain its options: {NEEDS_ARGUMENT_CHECKS.get(words[0], '')}",
         ),
         (
             wildcard and len(words) < 2 and words[0] not in REMOTE_SHELLS,

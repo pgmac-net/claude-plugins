@@ -107,7 +107,6 @@ def test_rules_refuse_a_bad_site_rule():
         "Grep(//srv/runbooks/**)",
         "Bash(zpool status *)",
         "Bash(docker ps *)",
-        "Bash(kubectl get --raw /healthz)",
     ],
 )
 def test_acceptable_site_rules(rule):
@@ -123,13 +122,18 @@ def test_acceptable_site_rules(rule):
         ("Edit(//etc/**)", "must be"),
         ("Write", "must be"),
         ("WebFetch", "must be"),
-        ("Bash(kubectl *)", "two words"),
+        ("Bash(zpool *)", "two words"),
+        ("Bash(kubectl get *)", "kube_read.py"),
+        ("Bash(kubectl get --raw /healthz)", "kube_read.py"),
+        ("Bash(helm list *)", "another server"),
+        ("Bash(git log *)", "any file"),
+        ("Bash(journalctl -u nginx *)", "any file"),
         ("Bash(sudo systemctl status *)", "runs other commands"),
         ("Bash(bash -c *)", "runs other commands"),
         ("Bash(python3 -m http *)", "runs other commands"),
-        ("Bash(kubectl delete pod *)", "mutation"),
+        ("Bash(docker rm web *)", "mutation"),
         ("Bash(systemctl restart nginx)", "mutation"),
-        ("Bash(kubectl exec web *)", "deny-list"),
+        ("Bash(gh auth status *)", "deny-list"),
         ("Bash(zpool status; rm -rf / *)", "shell operators"),
         ("Bash(echo $HOME *)", "shell operators"),
     ],
@@ -202,7 +206,7 @@ def test_a_token_in_the_chat_section_is_refused_without_echo(edit_site):
 
 
 def test_bad_and_risky_site_rules_surface_in_validation(edit_site):
-    errors, warnings = errors_and_warnings(edit_site, chat(allow=["Bash(kubectl *)", "Bash(ssh backup-host *)"]))
+    errors, warnings = errors_and_warnings(edit_site, chat(allow=["Bash(kubectl get *)", "Bash(ssh backup-host *)"]))
     assert any("chat/allow/0" in err for err in errors)
     assert any("chat/allow/1" in warning for warning in warnings)
 
