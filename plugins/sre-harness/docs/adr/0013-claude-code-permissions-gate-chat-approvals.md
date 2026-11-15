@@ -17,6 +17,6 @@ Permission rules match command text with wildcards; they cannot parse a program'
 ## Consequences
 
 - The allow-list is not a sandbox. Claude Code treats a fixed set of read-only shell commands as allowed in every mode, and applies path deny rules to them only on a best-effort basis. The deny-list narrows what the agent can read; the approval gate is what stops a change.
-- A site may add allow rules only of a restricted form: a command prefix of at least two words with no shell characters, a path rule for Read, Grep or Glob, or an MCP server or tool. Whole tools, Edit and Write, wrapper commands, mutations and anything on the deny-list are refused by validation. A remote-shell prefix is accepted with a warning.
+- A site may add allow rules only of a restricted form: a command prefix of at least two words with no shell characters, a path rule for Read, Grep or Glob, or one MCP tool by name (never a whole server, which would also allow tools it adds later). Whole tools, Edit and Write, wrapper commands, mutations and anything on the deny-list are refused by validation. A remote-shell prefix is accepted with a warning.
 - Incidents driven from chat share the subscription's usage window with interactive work.
 - The audit log is still a record kept by cooperating software on the same account. The gateway's records make chat approvals verifiable, not tamper-proof.

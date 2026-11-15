@@ -122,7 +122,7 @@ incident:
 #   approval_ttl_seconds: 300
 #   idle_stop_minutes: 30
 #   max_sessions: 2
-#   allow: []   # e.g. mcp__<monitoring server> for a read-only MCP server
+#   allow: []   # e.g. mcp__<server>__<tool>, one read-only MCP tool per entry
 #   secrets_env:
 #     bot_token: SLACK_BOT_TOKEN
 #     app_token: SLACK_APP_TOKEN

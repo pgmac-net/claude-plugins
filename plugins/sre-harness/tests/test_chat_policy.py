@@ -84,9 +84,9 @@ def test_deny_list_covers_credentials_secrets_and_the_web():
 
 
 def test_settings_json_is_permissions_only_and_merges_site_rules():
-    settings = json.loads(chat_policy.settings_json(chat(allow=["mcp__monitoring"]), Path("/p")))
+    settings = json.loads(chat_policy.settings_json(chat(allow=["mcp__monitoring__get_alerts"]), Path("/p")))
     assert set(settings) == {"permissions"}
-    assert "mcp__monitoring" in settings["permissions"]["allow"]
+    assert "mcp__monitoring__get_alerts" in settings["permissions"]["allow"]
     assert "WebFetch" in settings["permissions"]["deny"]
 
 
@@ -101,8 +101,8 @@ def test_rules_refuse_a_bad_site_rule():
 @pytest.mark.parametrize(
     "rule",
     [
-        "mcp__monitoring",
         "mcp__monitoring__get_alerts",
+        "mcp__my-server__get_host_status",
         "Read(//srv/runbooks/**)",
         "Grep(//srv/runbooks/**)",
         "Bash(zpool status *)",
@@ -118,13 +118,16 @@ def test_every_accepted_bash_rule_carries_a_warning():
     """No list knows every program; the reviewer is told what to check."""
     _problem, warning = chat_policy.check_site_rule("Bash(zpool status *)")
     assert "any arguments" in warning
-    assert chat_policy.check_site_rule("mcp__monitoring") == (None, None)
+    assert chat_policy.check_site_rule("mcp__monitoring__get_alerts") == (None, None)
 
 
 @pytest.mark.parametrize(
     ("rule", "why"),
     [
         ("Bash", "must be"),
+        ("mcp__monitoring", "whole MCP servers"),
+        ("mcp__monitoring__*", "whole MCP servers"),
+        ("mcp__*", "whole MCP servers"),
         ("Bash(*)", "must be"),
         ("Bash(* --help)", "must be"),
         ("Edit(//etc/**)", "must be"),
@@ -181,7 +184,7 @@ def test_empty_chat_means_no_gateway(site):
 
 
 def test_a_full_chat_section_is_valid(edit_site):
-    report = vs.validate(edit_site(lambda doc: doc.update({"chat": chat(allow=["mcp__monitoring"])})))
+    report = vs.validate(edit_site(lambda doc: doc.update({"chat": chat(allow=["mcp__monitoring__get_alerts"])})))
     assert report.errors == []
     assert report.summary["chat"] == {"adapter": "slack", "responders": 2, "approvers": 1, "site_allow_rules": 1}
 
