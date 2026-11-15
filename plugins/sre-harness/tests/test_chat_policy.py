@@ -49,6 +49,18 @@ def test_no_mutation_and_no_remote_shell_in_the_default_allow_list():
             assert not prefix.startswith(("ssh", "sudo")), rule
 
 
+def test_no_default_rule_for_commands_with_file_reading_or_writing_options():
+    """git diff --no-index, git log --output and journalctl --file/--vacuum reach outside the deny rules."""
+    allow = chat_policy.default_allow(Path("/p"))
+    assert not any(rule.startswith(("Bash(git ", "Bash(journalctl")) for rule in allow)
+
+
+def test_kubectl_cannot_be_pointed_at_another_credential():
+    deny = chat_policy.default_deny()
+    assert "Bash(kubectl *--kubeconfig*)" in deny
+    assert "Bash(kubectl *--token*)" in deny
+
+
 def test_deny_list_covers_credentials_secrets_and_the_web():
     deny = chat_policy.default_deny()
     for rule in (

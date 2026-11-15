@@ -48,8 +48,13 @@ HARNESS_CALLS = (
     "catalog_check.py",
 )
 
-# Read-only commands beyond Claude Code's built-in set. Nothing here takes a
-# file argument that could name a credential outside the Read deny rules.
+# Read-only commands beyond Claude Code's built-in set. Only commands whose
+# every option is read-only against a cluster or the code host are listed:
+# git and journalctl are left out because some of their options read any file
+# (git diff --no-index, journalctl --file) or write one (git log --output,
+# journalctl --vacuum-*). Claude Code still runs plain read-only git itself;
+# anything else from them becomes an approval request. kubectl options that
+# point at another credential are denied below.
 READ_ONLY_BASH = (
     "kubectl get",
     "kubectl describe",
@@ -64,11 +69,6 @@ READ_ONLY_BASH = (
     "gh issue list",
     "gh pr view",
     "gh pr list",
-    "git log",
-    "git show",
-    "git diff",
-    "git status",
-    "journalctl",
     "systemctl status",
     "systemctl is-active",
     "systemctl list-units",
@@ -116,10 +116,15 @@ DENY_BASH = (
     "kubectl proxy",
     "kubectl run",
 )
-# Matched anywhere after the verb: 'kubectl get pods,secrets' names secrets too.
+# Matched anywhere after the verb: 'kubectl get pods,secrets' names secrets too,
+# and --kubeconfig or --token would read or use a credential the agent was not given.
 DENY_BASH_ANYWHERE = (
     "kubectl get *secret",
     "kubectl describe *secret",
+    "kubectl *--kubeconfig",
+    "kubectl *--token",
+    "kubectl *--client-key",
+    "kubectl *--client-certificate",
 )
 DENY_TOOLS = ("WebFetch", "WebSearch")
 
