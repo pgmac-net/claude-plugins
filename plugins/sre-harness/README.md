@@ -142,6 +142,8 @@ Three triggers, all optional and all safe to miss:
 
 Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`create-pir`).
 
+**From chat.** With a `chat` section in `site.yaml` and the gateway running, a responder starts an incident with `/incident <text>` in Slack. The agent works it in a private channel. Every command that isn't pre-approved waits for a listed approver's click, which is recorded in the audit log. Setup and the threat model: [gateway/README.md](gateway/README.md).
+
 ## Contents
 
 | Path | Purpose |
@@ -165,6 +167,7 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 | `scripts/kube_read.py` | Read-only kubectl for an agent driven from chat: allowed verbs and options only, checked per argument, no shell |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
+| `gateway/` | The chat-ops gateway: Slack Socket Mode, approval requests, sessions per incident ([gateway/README.md](gateway/README.md)) |
 | `templates/site-repo/` | Starter layout for a new site repository |
 | `docs/adr/` | Design decisions |
 | `CONTEXT.md` | Glossary |

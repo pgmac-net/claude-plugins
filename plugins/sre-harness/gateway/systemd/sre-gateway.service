@@ -1,0 +1,26 @@
+# User service for the sre-harness chat gateway. Install as
+#   ~/.config/systemd/user/sre-gateway.service
+# replacing @PLUGIN@ with the plugin directory, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now sre-gateway
+# Needs lingering for the user (loginctl enable-linger) to run without a login.
+[Unit]
+Description=sre-harness chat gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Tokens and settings: SLACK_BOT_TOKEN, SLACK_APP_TOKEN (or the names site.yaml gives),
+# CLAUDE_CODE_OAUTH_TOKEN, SRE_HARNESS_SITE, optionally SRE_GATEWAY_MCP_CONFIG. Mode 0600.
+EnvironmentFile=%h/.config/sre-harness/gateway.env
+# uv, and the kubectl and gh the agent runs, must be on this PATH.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/snap/bin
+WorkingDirectory=@PLUGIN@/gateway
+ExecStartPre=%h/.local/bin/uv run --frozen --no-dev sre-gateway --check
+ExecStart=%h/.local/bin/uv run --frozen --no-dev sre-gateway
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

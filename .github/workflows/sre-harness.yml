@@ -49,6 +49,13 @@ jobs:
       - name: Validate the site template
         run: uv run scripts/validate_site.py --site templates/site-repo
 
+      - name: Gateway tests and pylint
+        working-directory: plugins/sre-harness/gateway
+        run: |
+          uv sync --frozen --group dev
+          uv run pytest -q
+          uv run pylint src tests
+
       # Generic patterns only. A site's real identifiers are checked locally
       # against its private denylist and never appear in this repository.
       - name: No site identifiers in the plugin
