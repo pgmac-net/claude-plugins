@@ -404,9 +404,10 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             ),
         )
         link = self.chat.channel_link(channel)
-        await self.chat.post(hub_thread, f"Continuing in {link}.")
-        label = self._label(session)
-        await self._announce(f"{label} {conv.incident} opened: {conv.title} · {state.get('url')} · {link}")
+        await self.chat.post(hub_thread, f"Continuing in {link}.", raw=True)
+        # The title came from the agent: scrubbed and escaped before it sits beside the raw channel link.
+        safe = [self.chat.escape(self._scrub(str(part))) for part in (conv.incident, conv.title, state.get("url"))]
+        await self._announce(f"{self._label(session)} {safe[0]} opened: {safe[1]} · {safe[2]} · {link}", raw=True)
 
     async def _create_channel(self, session: Session, state: dict[str, Any]) -> str | None:
         for suffix in range(6):
@@ -424,9 +425,10 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         await self.chat.post(session.place, "Every channel name for this incident is taken; carrying on here.")
         return None
 
-    async def _announce(self, text: str) -> None:
+    async def _announce(self, text: str, raw: bool = False) -> None:
+        """A one-line post in the hub. A raw text must already be scrubbed and escaped."""
         with contextlib.suppress(Exception):
-            await self.chat.post(Place(self.settings.hub), self._scrub(text))
+            await self.chat.post(Place(self.settings.hub), text if raw else self._scrub(text), raw=raw)
 
     async def _archive_loop(self) -> None:
         while True:

@@ -37,9 +37,16 @@ class FakeChat:
     async def stop(self) -> None:
         return None
 
-    async def post(self, place: Place, text: str) -> Posted:
+    raw_posts: list[str] = field(default_factory=list)
+
+    async def post(self, place: Place, text: str, raw: bool = False) -> Posted:
         self.posts.append((place, text))
+        if raw:
+            self.raw_posts.append(text)
         return Posted(place.channel, self._next())
+
+    def escape(self, text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     async def permalink(self, posted: Posted) -> str | None:
         return f"https://chat.example.com/{posted.channel}/{posted.ts}"

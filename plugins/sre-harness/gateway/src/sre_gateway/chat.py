@@ -68,6 +68,7 @@ class ApprovalView:
     summary: str
     statement_link: str | None
     expires_in_seconds: int
+    description: str | None = None
 
 
 class Handler(Protocol):
@@ -86,7 +87,11 @@ class ChatAdapter(Protocol):
 
     async def stop(self) -> None: ...
 
-    async def post(self, place: Place, text: str) -> Posted: ...
+    async def post(self, place: Place, text: str, raw: bool = False) -> Posted:
+        """Post text. It is escaped so it cannot mention, link or format; raw is for text the gateway composed
+        itself, with every part that came from elsewhere passed through escape() first."""
+
+    def escape(self, text: str) -> str: ...
 
     async def permalink(self, posted: Posted) -> str | None: ...
 

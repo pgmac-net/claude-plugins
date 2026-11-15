@@ -30,19 +30,28 @@ def to_mrkdwn(text: str) -> str:
 
 
 def _request_blocks(view: ApprovalView, footer: str, buttons: bool) -> list[dict[str, Any]]:
-    link = ""
+    """The request. What will run is a literal preformatted block: nothing in it can format, mention or link.
+
+    The agent's description and the outcome are plain text for the same reason.
+    """
+    header = f"*Approval needed* for `{escape(view.tool)}`. This will run:"
     if view.statement_link:
-        link = f"\n<{view.statement_link}|The agent's statement of the command and its blast radius>"
+        header += f"\n<{view.statement_link}|The agent's statement of the command and its blast radius>"
     blocks: list[dict[str, Any]] = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": header}},
         {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"*Approval needed* for `{escape(view.tool)}`\n```{escape(view.summary)}```{link}",
-            },
+            "type": "rich_text",
+            "elements": [{"type": "rich_text_preformatted", "elements": [{"type": "text", "text": view.summary}]}],
         },
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": escape(footer)}]},
     ]
+    if view.description:
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "plain_text", "text": f"Agent's description (unverified): {view.description}"}],
+            }
+        )
+    blocks.append({"type": "context", "elements": [{"type": "plain_text", "text": footer}]})
     if buttons:
         blocks.append(
             {
@@ -150,11 +159,11 @@ class SlackAdapter:
         async def _error(error: Exception) -> None:
             log.error("Slack handler failed: %s", type(error).__name__)
 
-    async def post(self, place: Place, text: str) -> Posted:
+    async def post(self, place: Place, text: str, raw: bool = False) -> Posted:
         reply = await self._client.chat_postMessage(
             channel=place.channel,
             thread_ts=place.thread,
-            text=to_mrkdwn(text),
+            text=to_mrkdwn(text if raw else escape(text)),
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -178,12 +187,14 @@ class SlackAdapter:
         await self._client.chat_update(
             channel=posted.channel,
             ts=posted.ts,
-            text=f"Approval request for {view.tool}: {outcome}",
+            text=escape(f"Approval request for {view.tool}: {outcome}"),
             blocks=_request_blocks(view, outcome, buttons=False),
         )
 
     async def tell(self, place: Place, user: str, text: str) -> None:
-        await self._client.chat_postEphemeral(channel=place.channel, user=user, text=text, thread_ts=place.thread)
+        await self._client.chat_postEphemeral(
+            channel=place.channel, user=user, text=escape(text), thread_ts=place.thread
+        )
 
     async def create_private_channel(self, name: str) -> str:
         try:
@@ -216,6 +227,9 @@ class SlackAdapter:
 
     def channel_link(self, channel: str) -> str:
         return f"<#{channel}>"
+
+    def escape(self, text: str) -> str:
+        return escape(text)
 
 
 def _reason_modal(request_id: str) -> dict[str, Any]:

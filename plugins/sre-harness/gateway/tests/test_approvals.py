@@ -140,3 +140,32 @@ async def test_unknown_request_click_is_ignored(action):
     chat, records = FakeChat(), []
     await broker(chat, records).on_click(Click("nope", APPROVER, action))
     assert records == []
+
+
+async def test_a_call_too_long_to_show_in_full_is_refused_unposted():
+    chat, records = FakeChat(), []
+    answer = await ask(broker(chat, records), command="echo " + "x" * 2000)
+    assert not answer.allow
+    assert "too long" in answer.message
+    assert chat.approvals == []
+
+
+async def test_description_is_kept_apart_from_what_runs():
+    chat, records = FakeChat(), []
+    b = broker(chat, records)
+    task = asyncio.create_task(
+        b.ask(
+            incident="incidents-7",
+            place=Place("C1"),
+            tool="Bash",
+            tool_input={"command": "touch x", "description": "only reads things"},
+            tool_use_id="toolu_1",
+            statement_link=None,
+        )
+    )
+    await settle()
+    view = chat.approvals[-1][1]
+    assert view.summary == "touch x"
+    assert view.description == "only reads things"
+    await b.on_click(Click(view.request_id, APPROVER, "deny"))
+    await task

@@ -53,13 +53,15 @@ class _Pending:
     closed: bool = False
 
 
-def describe(tool: str, tool_input: dict[str, Any]) -> str:
-    """What the request shows of the call. The caller redacts it."""
+def describe(tool: str, tool_input: dict[str, Any]) -> tuple[str, str | None]:
+    """(what will run, the agent's own description of it) for a request. The caller redacts both.
+
+    The description is the agent's words, not part of what runs, so it is shown apart and marked so.
+    """
     if tool == "Bash":
-        text = str(tool_input.get("command", ""))
         description = tool_input.get("description")
-        return f"{text}\n({description})" if description else text
-    return json.dumps(tool_input, indent=1, sort_keys=True, default=str)
+        return str(tool_input.get("command", "")), str(description) if description else None
+    return json.dumps(tool_input, indent=1, sort_keys=True, default=str), None
 
 
 class ApprovalBroker:
@@ -100,12 +102,22 @@ class ApprovalBroker:
                 "Refused: open or attach the incident record first (incident.py open). "
                 "Approvals are recorded in its audit log, so none can be given before it exists.",
             )
+        command, description = describe(tool, tool_input)
+        summary = self._scrub(command)
+        if len(summary) > SUMMARY_LIMIT:
+            # An approver must see all of what would run; a cut-off request could hide the part that matters.
+            return PermissionAnswer(
+                False,
+                f"Refused: the call is {len(summary)} characters, too long to show an approver in full "
+                f"(limit {SUMMARY_LIMIT}). Split it, or put the steps in a script and run that.",
+            )
         view = ApprovalView(
             request_id=secrets.token_hex(12),
             tool=tool,
-            summary=self._scrub(describe(tool, tool_input))[:SUMMARY_LIMIT],
+            summary=summary,
             statement_link=statement_link,
             expires_in_seconds=self._ttl,
+            description=self._scrub(description)[:300] if description else None,
         )
         pending = _Pending(view, incident, tool_input, tool_use_id, place)
         self._pending[view.request_id] = pending

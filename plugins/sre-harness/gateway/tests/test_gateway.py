@@ -354,3 +354,13 @@ async def test_closed_issue_archives_the_channel(state):
     await gateway.on_message(Incoming(session.conv.channel, OWNER, "hello?", "70.0"))
     await settle()
     await gateway.shutdown()
+
+
+async def test_hub_announcement_escapes_the_agent_supplied_title(state):
+    incident = write_incident(state, title="<!channel> pwned")
+    gateway, chat, _t, _r = make(state, [open_events(incident)], {})
+    await start_incident(gateway)
+    announcement = next(text for text in chat.raw_posts if "opened" in text)
+    assert "<!channel>" not in announcement
+    assert "&lt;!channel&gt;" in announcement
+    await gateway.shutdown()
