@@ -39,6 +39,7 @@ import shutil
 import subprocess  # noqa: S404 - fixed argv, no shell
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -217,10 +218,23 @@ def unauthorised_mutations(entries: list[tuple[str, dict[str, Any]]]) -> list[di
     pre-approved command typed into a shell instead is, correctly, reported.
     Commands are compared as recorded, that is, after redaction on both sides.
     """
+    # A chat approval names the one tool call it allowed. The hook records that call's
+    # attempt before the permission check runs, so the approval can follow its attempt.
+    # Credit needs the same call and the same input, both as redacted.
+    approved_calls = {
+        record["tool_use_id"]: json.dumps(record.get("input"), sort_keys=True)
+        for _line, record in entries
+        if record.get("event") == "approval" and record.get("via") == "chat" and record.get("tool_use_id")
+    }
     credit: dict[str, int] = {}
     found = []
     for _line, record in entries:
         event = record.get("event")
+        if event == "approval" and record.get("via") == "chat":
+            continue
+        approved_input = approved_calls.get(record.get("tool_use_id"))
+        if event == "attempt" and approved_input == json.dumps(record.get("input"), sort_keys=True):
+            continue
         if event == "approval" and record.get("command"):
             credit[record["command"]] = credit.get(record["command"], 0) + 1
             continue
@@ -307,6 +321,62 @@ def cmd_record(args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, 
     audit_hook.append(state["id"], record)
     print(f"{state['id']}: recorded {args.kind}")
     return 0
+
+
+CHAT_OUTCOMES = ("approved", "denied", "expired")
+
+
+@dataclass(frozen=True)
+class ChatDecision:
+    """A chat approver's answer to one tool call. 'approver' is None only when the request expired."""
+
+    outcome: str
+    tool: str
+    tool_input: dict[str, Any]
+    tool_use_id: str
+    approver: str | None
+    link: str | None
+    reason: str | None = None
+
+
+def record_chat_decision(incident_id: str, decision: ChatDecision) -> dict[str, Any]:
+    """Record a chat approver's decision on one tool call, before the agent is answered.
+
+    Written by the chat gateway, not the agent. The input is redacted the way
+    the hook redacts it, and also hashed exactly, so the record names the call
+    it decided without storing a secret. An approval covers only the call with
+    this tool_use_id.
+    """
+    if decision.outcome not in CHAT_OUTCOMES:
+        raise ValueError(f"outcome must be one of {CHAT_OUTCOMES}")
+    if decision.outcome != "expired" and not decision.approver:
+        raise ValueError("an approval or denial needs the approver's identity")
+    if audit_hook.is_closed(incident_id):
+        raise SiteError(f"the audit log for {incident_id} is committed and closed")
+    env_values = redact.env_secrets(extra_names=audit_hook.credential_names(incident_id))
+    redacted = redact.redact(decision.tool_input, env_values)
+    exact = json.dumps(decision.tool_input, sort_keys=True, ensure_ascii=False, default=str)
+    record: dict[str, Any] = {
+        "v": 1,
+        "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "incident": incident_id,
+        "capture": "gateway",
+        "via": "chat",
+        "event": "approval" if decision.outcome == "approved" else "denial",
+        "outcome": decision.outcome,
+        "tool": decision.tool,
+        "tool_use_id": decision.tool_use_id[:128],
+        "input": redacted,
+        "input_sha256": hashlib.sha256(exact.encode()).hexdigest(),
+        "approver": decision.approver,
+        "link": decision.link,
+    }
+    if decision.tool == "Bash" and isinstance(redacted.get("command"), str):
+        record["command"] = redacted["command"]
+    if decision.reason:
+        record["reason"] = redact.redact_text(decision.reason, env_values, limit=500)
+    audit_hook.append(incident_id, record)
+    return record
 
 
 def cmd_show(_args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, Any], _root: Path) -> int:

@@ -118,6 +118,9 @@ def build_record(payload: dict[str, Any], incident_id: str, capture: str = "hook
         "tool": payload.get("tool_name"),
         "input": redact.redact(payload.get("tool_input") or {}, env_values),
     }
+    if isinstance(payload.get("tool_use_id"), str):
+        # Ties an attempt to the approval a chat gateway recorded for that one call.
+        record["tool_use_id"] = payload["tool_use_id"][:128]
     if record["event"] == "complete":
         response = payload.get("tool_response")
         text = response_text(response)

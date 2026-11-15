@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import autonomy
 import catalog_check
+import chat_policy
 from redact import secret_label
 from sre_common import SITE_ENV, SITE_FILE, Report, SiteError, load_yaml, print_findings, resolve_site, schema_errors
 
@@ -232,6 +233,43 @@ def check_autonomy(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dic
     }
 
 
+# Identifier shapes per chat platform: (channel, user).
+CHAT_IDS = {"slack": (re.compile(r"^[CG][A-Z0-9]{8,12}$"), re.compile(r"^[UW][A-Z0-9]{8,12}$"))}
+
+
+def check_chat(doc: dict[str, Any]) -> tuple[list[str], list[str], dict[str, Any] | None]:
+    """The chat gateway's identities must have the platform's shape; approvers must be responders."""
+    chat = doc.get("chat") or {}
+    if not chat:
+        return [], [], None
+    errors = []
+    channel_id, user_id = CHAT_IDS[chat["adapter"]]
+    if not channel_id.fullmatch(chat["hub_channel"]):
+        errors.append(f"chat/hub_channel: not a {chat['adapter']} channel ID")
+    for key in ("responders", "approvers"):
+        errors += [
+            f"chat/{key}/{index}: not a {chat['adapter']} user ID"
+            for index, value in enumerate(chat[key])
+            if not user_id.fullmatch(value)
+        ]
+    outsiders = [index for index, value in enumerate(chat["approvers"]) if value not in chat["responders"]]
+    errors += [f"chat/approvers/{index}: not listed in chat/responders" for index in outsiders]
+    if len(set(chat["secrets_env"].values())) < len(chat["secrets_env"]):
+        errors.append("chat/secrets_env: each token needs its own environment variable")
+    rule_errors, rule_warnings = chat_policy.site_findings(chat)
+    errors += rule_errors
+    return (
+        errors,
+        rule_warnings,
+        {
+            "adapter": chat["adapter"],
+            "responders": len(chat["responders"]),
+            "approvers": len(chat["approvers"]),
+            "site_allow_rules": len(chat.get("allow", [])),
+        },
+    )
+
+
 def check_tiers(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any], dict[str, Any] | None]:
     """Validate the tier definitions file named by site.yaml. Returns errors, summary and the document."""
     tiers_file = doc.get("tiers_file")
@@ -273,6 +311,9 @@ def validate(site_root: Path) -> Report:
     autonomy_errors, autonomy_summary = ([], {}) if path_errors else check_autonomy(site_root, doc)
     report.errors.extend(autonomy_errors)
     incident_summary["autonomy"] = autonomy_summary or None
+    chat_errors, chat_warnings, chat_summary = check_chat(doc)
+    report.errors.extend(f"{SITE_FILE}: {msg}" for msg in chat_errors)
+    report.warnings.extend(f"{SITE_FILE}: {msg}" for msg in chat_warnings)
 
     catalog_summary: dict[str, Any] = {}
     if not path_errors and not tier_errors:
@@ -289,6 +330,7 @@ def validate(site_root: Path) -> Report:
         "audit": f"{doc['audit']['repo']}:{doc['audit']['path']}",
         "incident": incident_summary,
         "chat_configured": bool(doc.get("chat")),
+        "chat": chat_summary,
         "slo_configured": bool(doc.get("slo")),
         **tier_summary,
     }

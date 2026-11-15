@@ -178,6 +178,22 @@ _Avoid_: Test incident, game day, simulation
 A documented procedure for one failure mode, with diagnosis separated from recovery.
 _Avoid_: Playbook, SOP
 
+**Chat gateway**:
+The process that connects a chat platform to an agent session: it relays messages and asks for approvals, and holds no model logic.
+_Avoid_: Bot, chat bridge
+
+**Responder**:
+A chat user whose messages reach the agent, listed by ID in site configuration.
+_Avoid_: Member, participant
+
+**Approver**:
+A responder whose answer to an approval request counts.
+_Avoid_: Admin, owner
+
+**Approval request**:
+A single-use, expiring chat message asking an approver to allow one tool call, stating the call and its blast radius.
+_Avoid_: Approval card, confirmation prompt
+
 **PIR**:
 A post-incident review: the written analysis of an incident's causes and the actions that follow.
 _Avoid_: Post-mortem, RCA document

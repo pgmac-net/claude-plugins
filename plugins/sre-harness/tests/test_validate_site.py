@@ -32,6 +32,11 @@ def test_wrong_schema_version_is_rejected(edit_site):
 
 
 def test_reserved_sections_must_stay_empty(edit_site):
+    site = edit_site(lambda doc: doc.update({"slo": {"target": "99.9"}}))
+    assert any(err.startswith("site.yaml: slo") for err in errors_for(site))
+
+
+def test_unknown_chat_key_is_rejected(edit_site):
     site = edit_site(lambda doc: doc.update({"chat": {"channel": "ops"}}))
     assert any(err.startswith("site.yaml: chat") for err in errors_for(site))
 
