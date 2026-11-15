@@ -33,7 +33,12 @@ def test_default_allow_names_harness_scripts_by_absolute_path():
     allow = chat_policy.default_allow(Path("/opt/plugin/scripts"))
     assert "Bash(uv run /opt/plugin/scripts/incident.py open *)" in allow
     assert "Bash(uv run /opt/plugin/scripts/timeline.py *)" in allow
-    assert "Bash(kubectl get *)" in allow
+    assert "Bash(uv run /opt/plugin/scripts/kube_read.py *)" in allow
+
+
+def test_plain_kubectl_is_not_allow_listed():
+    """Its options can redirect the credential (-s bundled with other short flags); kube_read.py checks them."""
+    assert not any(rule.startswith("Bash(kubectl") for rule in chat_policy.default_allow(Path("/p")))
 
 
 def test_the_agent_cannot_record_its_own_approval():
@@ -57,7 +62,7 @@ def test_no_default_rule_for_commands_with_file_reading_or_writing_options():
 
 def test_kubectl_cannot_be_pointed_at_another_credential():
     deny = chat_policy.default_deny()
-    for option in ("--kubeconfig", "--token", "--server", "--as", "--insecure-skip-tls-verify"):
+    for option in ("--kubeconfig", "--token", "--server", "--as", "--user", "--cluster", "--insecure-skip-tls-verify"):
         assert f"Bash(kubectl *{option}*)" in deny
     assert "Bash(kubectl * -s*)" in deny
 

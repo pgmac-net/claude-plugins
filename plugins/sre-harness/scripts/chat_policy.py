@@ -46,25 +46,19 @@ HARNESS_CALLS = (
     "assist.py",
     "validate_site.py",
     "catalog_check.py",
+    "kube_read.py",
 )
 
 # Read-only commands beyond Claude Code's built-in set. Only commands whose
-# every option is read-only against a cluster or the code host are listed:
+# every option is read-only are listed: a prefix rule cannot exclude options.
 # git and journalctl are left out because some of their options read any file
 # (git diff --no-index, journalctl --file) or write one (git log --output,
-# journalctl --vacuum-*). Claude Code still runs plain read-only git itself;
-# anything else from them becomes an approval request. kubectl options that
-# point at another credential are denied below.
+# journalctl --vacuum-*); Claude Code still runs plain read-only git itself.
+# kubectl is left out because its options can send the credential elsewhere
+# (--server, or -s bundled with other short flags) or act as another identity;
+# kube_read.py, above, checks each argument and is the read path. Anything
+# else from these becomes an approval request.
 READ_ONLY_BASH = (
-    "kubectl get",
-    "kubectl describe",
-    "kubectl logs",
-    "kubectl top",
-    "kubectl events",
-    "kubectl api-resources",
-    "kubectl version",
-    "kubectl config current-context",
-    "kubectl config get-contexts",
     "gh issue view",
     "gh issue list",
     "gh pr view",
@@ -116,11 +110,13 @@ DENY_BASH = (
     "kubectl proxy",
     "kubectl run",
 )
-# Matched anywhere after the verb: 'kubectl get pods,secrets' names secrets too.
+# A second layer for kubectl run directly, which needs an approval anyway: denied
+# outright, wherever they appear. 'kubectl get pods,secrets' names secrets too.
 # The connection options would read or use another credential (--kubeconfig,
-# --token, client certificates), send the configured one to another host
-# (--server, -s, with the TLS options that make that work) or act as another
-# identity (--as and its variants).
+# --token, --user, --cluster, client certificates), send the configured one to
+# another host (--server, -s, with the TLS options that make that work) or act
+# as another identity (--as and its variants). Glob patterns cannot see
+# bundled short flags; kube_read.py is the control that can.
 DENY_BASH_ANYWHERE = (
     "kubectl get *secret",
     "kubectl describe *secret",
@@ -131,6 +127,8 @@ DENY_BASH_ANYWHERE = (
     "kubectl *--server",
     "kubectl * -s",
     "kubectl *--as",
+    "kubectl *--user",
+    "kubectl *--cluster",
     "kubectl *--username",
     "kubectl *--password",
     "kubectl *--certificate-authority",
