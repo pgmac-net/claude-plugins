@@ -82,6 +82,9 @@ async def start_incident(gateway, text="Web down", user=OWNER):
 def test_channel_names():
     assert channel_name({"number": 7, "title": "Web is DOWN!"}) == "inc-7-web-is-down"
     assert channel_name({"number": 3, "title": "[DRILL] Jiva stuck", "drill": True}) == "drill-3-jiva-stuck"
+    drill = {"number": 14, "title": "[DRILL] Drill: gateway end-to-end test", "drill": True}
+    assert channel_name(drill) == "drill-14-gateway-end-to-end-test"
+    assert channel_name({"number": 5, "title": "Drilling rig offline"}) == "inc-5-drilling-rig-offline"
     assert channel_name({"number": 7, "title": "x"}, 2) == "inc-7-x-2"
     assert len(channel_name({"number": 1, "title": "y" * 300})) <= 80
 
@@ -364,3 +367,24 @@ async def test_hub_announcement_escapes_the_agent_supplied_title(state):
     assert "<!channel>" not in announcement
     assert "&lt;!channel&gt;" in announcement
     await gateway.shutdown()
+
+
+async def test_a_failed_start_releases_its_session_slot(state):
+    """A turn that failed before any record exists holds nothing worth keeping warm."""
+    log = {}
+    gateway, _chat, _t, _r = make(state, [[TurnEnd(None, "API error 401")]], log, max_sessions=1)
+    await start_incident(gateway)
+    session = next(iter(gateway.sessions.values()))
+    assert session.driver is None
+    assert log["stops"] == 1
+    assert gateway.status(session).endswith("Last problem: API error 401")
+    await gateway.shutdown()
+
+
+def test_prompt_asks_for_plain_harness_calls_and_leaves_closing_to_people():
+    from sre_gateway import prompts  # noqa: PLC0415  pylint: disable=import-outside-toplevel
+
+    text = prompts.system_append("/opt/plugin/scripts")
+    assert "uv run /opt/plugin/scripts/<script>.py" in text
+    assert "no shell variables" in text
+    assert "Do not close the incident" in text

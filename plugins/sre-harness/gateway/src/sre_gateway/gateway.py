@@ -63,6 +63,7 @@ class Session:
     last_problem: str | None = None
     calls: dict[str, ToolCall] = field(default_factory=dict)
     worker: asyncio.Task | None = None
+    release_after_turn: bool = False
 
     @property
     def place(self) -> Place:
@@ -86,7 +87,8 @@ def chunks(text: str, size: int = CHUNK) -> list[str]:
 def channel_name(incident: dict[str, Any], suffix: int = 0) -> str:
     """'inc-<number>-<slug>', or 'drill-…' for a drill; lower case, at most 80 characters."""
     prefix = "drill" if incident.get("drill") else "inc"
-    title = re.sub(r"^\[drill\]\s*", "", str(incident.get("title", "")), flags=re.IGNORECASE)
+    # Drop '[DRILL]' and a leading 'Drill:' so the prefix is not repeated in the name.
+    title = re.sub(r"^(?:\[drill\]\s*)?(?:drill\b[\s:-]*)?", "", str(incident.get("title", "")), flags=re.IGNORECASE)
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40].strip("-") or "incident"
     name = f"{prefix}-{incident['number']}-{slug}"
     return (f"{name[:76]}-{suffix}" if suffix else name)[:80]
@@ -279,6 +281,9 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             if not await self._ensure_driver(session):
                 continue
             await self._turn(session, message)
+            if session.release_after_turn:
+                session.release_after_turn = False
+                await self._park(session)
 
     async def _ensure_driver(self, session: Session) -> bool:
         if session.driver is not None:
@@ -338,6 +343,9 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             if event.error:
                 session.last_problem = event.error
                 await self._say(session.place, f"The agent stopped: {event.error}")
+                if not session.conv.incident:
+                    # Nothing to keep warm: free the slot for others; the next message resumes the session.
+                    session.release_after_turn = True
 
     async def _on_tool_output(self, session: Session, event: ToolOutput) -> None:
         call = session.calls.pop(event.tool_use_id, None)
