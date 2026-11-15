@@ -116,8 +116,11 @@ DENY_BASH = (
     "kubectl proxy",
     "kubectl run",
 )
-# Matched anywhere after the verb: 'kubectl get pods,secrets' names secrets too,
-# and --kubeconfig or --token would read or use a credential the agent was not given.
+# Matched anywhere after the verb: 'kubectl get pods,secrets' names secrets too.
+# The connection options would read or use another credential (--kubeconfig,
+# --token, client certificates), send the configured one to another host
+# (--server, -s, with the TLS options that make that work) or act as another
+# identity (--as and its variants).
 DENY_BASH_ANYWHERE = (
     "kubectl get *secret",
     "kubectl describe *secret",
@@ -125,6 +128,14 @@ DENY_BASH_ANYWHERE = (
     "kubectl *--token",
     "kubectl *--client-key",
     "kubectl *--client-certificate",
+    "kubectl *--server",
+    "kubectl * -s",
+    "kubectl *--as",
+    "kubectl *--username",
+    "kubectl *--password",
+    "kubectl *--certificate-authority",
+    "kubectl *--insecure-skip-tls-verify",
+    "kubectl *--tls-server-name",
 )
 DENY_TOOLS = ("WebFetch", "WebSearch")
 

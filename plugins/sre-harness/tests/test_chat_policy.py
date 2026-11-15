@@ -57,8 +57,9 @@ def test_no_default_rule_for_commands_with_file_reading_or_writing_options():
 
 def test_kubectl_cannot_be_pointed_at_another_credential():
     deny = chat_policy.default_deny()
-    assert "Bash(kubectl *--kubeconfig*)" in deny
-    assert "Bash(kubectl *--token*)" in deny
+    for option in ("--kubeconfig", "--token", "--server", "--as", "--insecure-skip-tls-verify"):
+        assert f"Bash(kubectl *{option}*)" in deny
+    assert "Bash(kubectl * -s*)" in deny
 
 
 def test_deny_list_covers_credentials_secrets_and_the_web():
