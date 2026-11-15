@@ -177,14 +177,20 @@ WRAPPERS = frozenset(
         "make",
     }
 )
-# Programs whose options a prefix rule cannot constrain: options that redirect the
-# credential, act as another identity, or read and write any file.
+# Programs whose options a prefix rule cannot constrain: options that redirect a
+# credential, act as another identity, read or write any file, transfer data or
+# run other programs. Matched by basename, anywhere in the prefix. This is a
+# guard rail, not the control: every accepted Bash rule also carries a warning,
+# because no list can know every program a site might name.
+_CLUSTER = "its options can send the cluster credential to another server; use kube_read.py"
+_FILES = "its options can read or write any file"
+_TRANSFER = "it transfers data or runs other programs"
 NEEDS_ARGUMENT_CHECKS = {
-    "kubectl": "use kube_read.py, which checks each option",
-    "oc": "its options can send the credential to another server",
-    "helm": "its options can send the credential to another server",
-    "git": "some of its options read or write any file",
-    "journalctl": "some of its options read any file or change state",
+    **dict.fromkeys(("kubectl", "kubecolor", "oc", "k3s", "k0s", "microk8s", "rke2", "kubeadm"), _CLUSTER),
+    **dict.fromkeys(("helm", "flux", "argocd", "kustomize", "terraform", "ansible", "kubectx", "kubens"), _CLUSTER),
+    **dict.fromkeys(("git", "journalctl", "sed", "tar", "zip", "unzip", "cp", "dd", "tee", "install"), _FILES),
+    **dict.fromkeys(("curl", "wget", "scp", "sftp", "rsync", "nc", "ncat", "netcat", "socat", "ftp"), _TRANSFER),
+    **dict.fromkeys(("docker", "podman", "nerdctl", "crictl", "ctr", "systemd-run", "at", "crontab"), _TRANSFER),
 }
 INTERPRETER = re.compile(r"^python[0-9.]*$")
 REMOTE_SHELLS = frozenset({"ssh", "mosh"})
@@ -229,14 +235,18 @@ def check_site_rule(rule: str) -> tuple[str | None, str | None]:
     problem = _bash_prefix_problem(prefix, wildcard)
     if problem:
         return problem, None
-    if prefix.split()[0] in REMOTE_SHELLS and wildcard:
+    if Path(prefix.split()[0]).name in REMOTE_SHELLS and wildcard:
         return None, "a remote shell prefix lets any command on that host run without approval"
-    return None, None
+    return None, (
+        f"'{prefix}' runs without approval with any arguments: check that none of its options writes a file, "
+        "changes state, reads a credential or contacts another host"
+    )
 
 
 def _bash_prefix_problem(prefix: str, wildcard: bool) -> str | None:
     """Why a site's Bash allow rule is refused, checked in order; None if none applies."""
-    words = prefix.split() or [""]
+    words = [Path(word).name for word in prefix.split()] or [""]
+    risky = next((word for word in words if word in NEEDS_ARGUMENT_CHECKS), None)
     checks = (
         (bool(SHELL_CHARACTERS.search(prefix)), "the command prefix may not contain quotes or shell operators"),
         (not words[0], "a Bash rule needs a command prefix"),
@@ -245,8 +255,8 @@ def _bash_prefix_problem(prefix: str, wildcard: bool) -> str | None:
             f"'{words[0]}' runs other commands; allowing it would allow anything",
         ),
         (
-            words[0] in NEEDS_ARGUMENT_CHECKS,
-            f"a '{words[0]}' prefix cannot constrain its options: {NEEDS_ARGUMENT_CHECKS.get(words[0], '')}",
+            risky is not None,
+            f"a rule naming '{risky}' cannot constrain its options: {NEEDS_ARGUMENT_CHECKS.get(risky or '', '')}",
         ),
         (
             wildcard and len(words) < 2 and words[0] not in REMOTE_SHELLS,

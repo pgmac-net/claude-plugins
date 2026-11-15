@@ -16,8 +16,8 @@ argument list with no shell.
 Refused: any option not listed (so every connection, credential and
 impersonation option: --server, -s, --token, --kubeconfig, --as, --user,
 --cluster, client certificates), bundled or attached short flags, --raw,
-watching or following (a turn would never end), output formats that read a
-file, and any argument that names secrets.
+watching or following (a turn would never end), any output format not named
+(several read a file), and any argument that names secrets.
 
 Usage: kube_read.py <verb> [arguments]   e.g. kube_read.py get pods -n web -o wide
 Exit codes: kubectl's own, or 2 if the command was refused.
@@ -85,7 +85,9 @@ SHORT = {short: long for long, short in {**VALUE_OPTIONS, **FLAG_OPTIONS}.items(
 # No quotes, no shell characters; a jsonpath filter expression is not supported.
 SAFE_VALUE = re.compile(r"^[A-Za-z0-9._/:,=@+{}\[\]*-]{1,400}$")
 SECRET = re.compile(r"secret", re.IGNORECASE)
-FILE_OUTPUT = re.compile(r"-file\b", re.IGNORECASE)
+# Output formats are allowed by name, not refused by pattern: kubectl reads a file
+# for several spellings (go-template-file, templatefile, jsonpath-file and more).
+OUTPUT = re.compile(r"^(?:wide|name|json|yaml|(?:jsonpath|jsonpath-as-json|custom-columns|go-template)=.+)$")
 TIMEOUT_SECONDS = 120
 
 
@@ -112,8 +114,11 @@ def _check_value(name: str, value: str) -> None:
         raise Refused(f"the value of {name} has characters this script does not pass on")
     if SECRET.search(value):
         raise Refused("secrets are never read from chat")
-    if name == "--output" and FILE_OUTPUT.search(value):
-        raise Refused("output formats that read a template file are not allowed")
+    if name == "--output" and not OUTPUT.fullmatch(value):
+        raise Refused(
+            "output format must be wide, name, json, yaml, "
+            "jsonpath=, jsonpath-as-json=, custom-columns= or go-template="
+        )
 
 
 def check(argv: list[str]) -> list[str]:

@@ -106,11 +106,19 @@ def test_rules_refuse_a_bad_site_rule():
         "Read(//srv/runbooks/**)",
         "Grep(//srv/runbooks/**)",
         "Bash(zpool status *)",
-        "Bash(docker ps *)",
+        "Bash(smartctl -H /dev/sda)",
     ],
 )
 def test_acceptable_site_rules(rule):
-    assert chat_policy.check_site_rule(rule) == (None, None)
+    problem, _warning = chat_policy.check_site_rule(rule)
+    assert problem is None
+
+
+def test_every_accepted_bash_rule_carries_a_warning():
+    """No list knows every program; the reviewer is told what to check."""
+    _problem, warning = chat_policy.check_site_rule("Bash(zpool status *)")
+    assert "any arguments" in warning
+    assert chat_policy.check_site_rule("mcp__monitoring") == (None, None)
 
 
 @pytest.mark.parametrize(
@@ -126,12 +134,20 @@ def test_acceptable_site_rules(rule):
         ("Bash(kubectl get *)", "kube_read.py"),
         ("Bash(kubectl get --raw /healthz)", "kube_read.py"),
         ("Bash(helm list *)", "another server"),
+        ("Bash(/usr/local/bin/kubectl get *)", "kube_read.py"),
+        ("Bash(microk8s kubectl get *)", "microk8s"),
+        ("Bash(kubecolor get pods *)", "kubecolor"),
+        ("Bash(argocd app list *)", "another server"),
+        ("Bash(docker ps *)", "runs other programs"),
+        ("Bash(curl -s http *)", "transfers data"),
+        ("Bash(rsync -n src *)", "transfers data"),
+        ("Bash(sed -n 1p *)", "any file"),
         ("Bash(git log *)", "any file"),
         ("Bash(journalctl -u nginx *)", "any file"),
         ("Bash(sudo systemctl status *)", "runs other commands"),
         ("Bash(bash -c *)", "runs other commands"),
         ("Bash(python3 -m http *)", "runs other commands"),
-        ("Bash(docker rm web *)", "mutation"),
+        ("Bash(service nginx restart)", "mutation"),
         ("Bash(systemctl restart nginx)", "mutation"),
         ("Bash(gh auth status *)", "deny-list"),
         ("Bash(zpool status; rm -rf / *)", "shell operators"),
