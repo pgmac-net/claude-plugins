@@ -162,8 +162,7 @@ class SdkDriver:
             ]
         elif isinstance(item, ResultMessage):
             self.session_id = item.session_id or self.session_id
-            error = item.subtype if item.is_error or item.subtype != "success" else None
-            events.append(TurnEnd(self.session_id, error, item.total_cost_usd))
+            events.append(TurnEnd(self.session_id, _result_error(item), item.total_cost_usd))
         return events
 
     async def stop(self) -> None:
@@ -180,6 +179,25 @@ ERRORS = {
     "authentication_failed": "The agent could not sign in. The gateway's Claude token needs renewing.",
     "billing_error": "The agent's account has a billing problem.",
 }
+
+
+def _result_error(result: Any) -> str | None:
+    """Why a turn failed, in words a person can act on; None if it did not.
+
+    A turn can fail with subtype 'success' (an API error ends it early), so the
+    subtype alone is not the reason.
+    """
+    if not result.is_error and result.subtype == "success":
+        return None
+    parts = []
+    if getattr(result, "api_error_status", None):
+        parts.append(f"API error {result.api_error_status}")
+    if result.subtype != "success":
+        parts.append(result.subtype)
+    reason = getattr(result, "terminal_reason", None)
+    if reason and reason not in parts:
+        parts.append(str(reason))
+    return ", ".join(parts) or "the turn ended with an error"
 
 
 def _assistant_error(kind: Any) -> str:

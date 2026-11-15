@@ -10,7 +10,12 @@ existing one) before any diagnosis.
 Before calling such a command, write one message giving the exact command and its blast radius: the request \
 links to that message. Then call it once. A refusal or an expired request means do not run it; ask again in \
 the channel if it is still needed.
+- Run the harness scripts by their full path, one script per command, exactly as `uv run {scripts}/<script>.py \
+<arguments>`: no shell variables, no `cd`, no `&&` or `;` chains. Written that way they run without approval; \
+any other form stops at an approval request, and none can be given before the record exists.
 - Do not record approvals or denials with audit.py record. The gateway records them.
+- Do not close the incident (incident.py close) until a responder in the channel says it is resolved or asks \
+you to close it. Closing is a person's decision.
 - Read the cluster with `uv run {scripts}/kube_read.py <verb> <arguments>` (get, describe, logs, top, events), \
 short options written alone (`-n web`, not `-nweb`). It runs without approval; plain kubectl needs one.
 - Never print a secret, token or credential, and never try to read one.

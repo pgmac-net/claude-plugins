@@ -93,7 +93,7 @@ def test_invalid_site_is_an_error(site):
     doc = yaml.safe_load((site / "site.yaml").read_text(encoding="utf-8"))
     doc["chat"]["approvers"] = ["U" + "0STRANGE1"]
     (site / "site.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
-    with pytest.raises(config_module.ConfigError, match="not valid"):
+    with pytest.raises(config_module.ConfigError, match="not valid: .*chat/approvers/0: not listed"):
         config_module.load(env_for(site), take_tokens=False)
 
 
@@ -167,6 +167,12 @@ def test_sdk_messages_become_events():
     assert isinstance(driver._events(limited)[0], Notice)
     result = ResultMessage("error_max_turns", 1, 1, True, 3, "s-2", total_cost_usd=0.01)
     assert driver._events(result) == [TurnEnd("s-2", "error_max_turns", 0.01)]
+    auth = ResultMessage("success", 1, 1, True, 1, "s-2", api_error_status=401)
+    assert driver._events(auth)[0].error == "API error 401"
+    failed = ResultMessage("success", 1, 1, True, 1, "s-2")
+    assert driver._events(failed)[0].error == "the turn ended with an error"
+    fine = ResultMessage("success", 1, 1, False, 1, "s-2")
+    assert driver._events(fine)[0].error is None
     assert driver.session_id == "s-2"
 
 

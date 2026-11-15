@@ -87,7 +87,10 @@ def load(env: dict[str, str] | None = None, take_tokens: bool = True) -> Config:
     except harness.sre_common.SiteError as exc:
         raise ConfigError(str(exc)) from exc
     if not report.ok:
-        raise ConfigError(f"site is not valid ({len(report.errors)} error(s)); run validate_site.py")
+        # The validator's messages name keys and rules, never values, so they are safe to show.
+        shown = "; ".join(report.errors[:3])
+        more = f" (and {len(report.errors) - 3} more)" if len(report.errors) > 3 else ""
+        raise ConfigError(f"site is not valid: {shown}{more}")
     doc = harness.sre_common.load_yaml(site_root / harness.sre_common.SITE_FILE)
     chat = doc.get("chat") or {}
     if not chat:
