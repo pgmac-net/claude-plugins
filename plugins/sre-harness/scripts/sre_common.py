@@ -208,8 +208,11 @@ def run_gh(args: list[str], stdin: str | None = None, timeout: float | None = No
     except subprocess.TimeoutExpired as exc:
         raise SiteError(f"gh {' '.join(args[:2])} timed out after {timeout}s") from exc
     if done.returncode != 0:
-        lines = done.stderr.strip().splitlines()
-        raise SiteError(f"gh {' '.join(args[:2])} failed: {lines[-1] if lines else 'no output'}")
+        lines = [line.strip() for line in done.stderr.strip().splitlines() if line.strip()]
+        # gh puts the cause first ('unknown command', 'HTTP 403: …') and sometimes a hint or a
+        # usage listing after it, so the last line alone can be meaningless.
+        detail = "no output" if not lines else lines[0] if len(lines) == 1 else f"{lines[0]} … {lines[-1]}"
+        raise SiteError(f"gh {' '.join(args[:2])} failed: {detail}")
     return done.stdout
 
 
