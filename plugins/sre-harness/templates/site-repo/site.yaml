@@ -1,6 +1,6 @@
 # sre-harness site configuration. Validate with the plugin's scripts/validate_site.py.
 # Never put a secret here: name the environment variable that holds it.
-schema_version: 3
+schema_version: 4
 
 site:
   name: example
@@ -111,6 +111,22 @@ incident:
     repo: catalog
     label: drill
 
-# Reserved. Filled in by later schema versions.
+# Chat-ops gateway (gateway/ in the plugin). Empty means no gateway. Holds IDs,
+# never tokens: secrets_env names the environment variables that hold them.
+# Approvers must also be responders; change either only by reviewed pull request.
+# chat:
+#   adapter: slack
+#   hub_channel: <channel ID of the incidents hub>
+#   responders: [<user ID>]
+#   approvers: [<user ID>]
+#   approval_ttl_seconds: 300
+#   idle_stop_minutes: 30
+#   max_sessions: 2
+#   allow: []   # e.g. mcp__<monitoring server> for a read-only MCP server
+#   secrets_env:
+#     bot_token: SLACK_BOT_TOKEN
+#     app_token: SLACK_APP_TOKEN
 chat: {}
+
+# Reserved. Filled in by a later schema version.
 slo: {}

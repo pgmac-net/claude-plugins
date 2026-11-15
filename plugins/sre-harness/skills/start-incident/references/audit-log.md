@@ -30,6 +30,8 @@ uv run <plugin root>/scripts/audit.py record --kind approval \
 
 Record a refusal the same way with `--kind denial`. An approval record is your statement that the person agreed; it is not proof that they did. Record only what was actually said. Then run the command, and write the `action` timeline entry once you have seen its effect.
 
+**Driven from chat, you record no approvals.** When the session runs through the chat gateway, a command that needs approval stops at a permission prompt; the gateway shows it to an approver, records their decision, bound to that one call, and then answers. State the blast radius in your message before you run the command, so the request can link to it. A refused or expired request comes back as a denial: do not retry the same command without asking again in the channel.
+
 **If your agent has no hooks**, nothing is captured automatically. Record each command yourself, immediately after running it, with `--kind command --command "<exact command>" --text "<outcome>"`. These are marked `self-reported`: a weaker record, and the review will say so.
 
 ## Inspecting

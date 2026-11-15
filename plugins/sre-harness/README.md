@@ -151,7 +151,7 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 | `skills/describe-service/` | Interviews the user and writes one service entry |
 | `skills/start-incident/` | Works a live incident: record, triage, gated recovery, typed timeline |
 | `skills/create-pir/` | Writes the post-incident review from the timeline |
-| `schemas/` | JSON Schema for `site.yaml` (version 3), tier definitions, catalog entities and the pre-approved action list |
+| `schemas/` | JSON Schema for `site.yaml` (version 4), tier definitions, catalog entities and the pre-approved action list |
 | `scripts/validate_site.py` | Site validation: schema, paths, references, audit privacy, secret shapes, catalog |
 | `scripts/catalog_sync.py` | Source adapters and the generated layer |
 | `scripts/catalog_check.py` | Entity validation and drift report |
@@ -161,6 +161,7 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 | `scripts/audit.py` | Explicit audit records, verification, commit to the audit location |
 | `scripts/autonomy.py` | Decides whether a command is a pre-approved action, and executes it without a shell |
 | `scripts/assist.py` | Optional advisory second opinions from a judgment model, with masking |
+| `scripts/chat_policy.py` | Tool policy for an agent driven from chat: the read-only allow-list, the deny-list, checks on a site's additions |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
 | `templates/site-repo/` | Starter layout for a new site repository |
@@ -170,6 +171,8 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 Scripts need [`uv`](https://docs.astral.sh/uv/); dependencies are declared inline. Catalog sync also needs `git`, and `helm` for chart areas. The incident scripts need the `gh` CLI, signed in.
 
 ## Upgrading a site
+
+**From schema version 3 to 4.** Set `schema_version: 4`. `chat: {}` stays valid and means no chat gateway; the template shows a filled-in `chat` section.
 
 **From schema version 2 to 3.** Set `schema_version: 3` and add an `incident` section. Minimum:
 
