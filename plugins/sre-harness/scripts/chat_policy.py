@@ -139,7 +139,9 @@ DENY_TOOLS = ("WebFetch", "WebSearch")
 
 # What a site may add. Whole tools that write, and any rule that starts with a
 # wildcard, would remove the approval gate rather than widen what is readable.
-SITE_TOOL_RULE = re.compile(r"^(?:Read|Grep|Glob)\(.+\)$|^mcp__[A-Za-z0-9_-]+(?:__[A-Za-z0-9_*-]+)?$")
+# An MCP rule names one tool: a whole server, or a wildcard, would also allow
+# any tool the server adds later, including one that writes.
+SITE_TOOL_RULE = re.compile(r"^(?:Read|Grep|Glob)\(.+\)$|^mcp__[A-Za-z0-9_-]+?__[A-Za-z0-9_-]+$")
 SITE_BASH_RULE = re.compile(r"^Bash\(([A-Za-z0-9_./-][^()*]*?)( \*)?\)$")
 SHELL_CHARACTERS = re.compile(r"[;&|<>$`\\'\"\n]")
 # A first word that runs other commands: allowing it allows anything.
@@ -228,8 +230,8 @@ def check_site_rule(rule: str) -> tuple[str | None, str | None]:
     match = SITE_BASH_RULE.fullmatch(rule)
     if not match:
         return (
-            "must be Bash(<command prefix> *), Read/Grep/Glob(<path>) or mcp__<server>[__<tool>]; "
-            "whole tools, Edit, Write and rules starting with a wildcard are refused"
+            "must be Bash(<command prefix> *), Read/Grep/Glob(<path>) or mcp__<server>__<tool>; "
+            "whole tools, whole MCP servers, Edit, Write and rules starting with a wildcard are refused"
         ), None
     prefix, wildcard = match.group(1).strip(), bool(match.group(2))
     problem = _bash_prefix_problem(prefix, wildcard)
