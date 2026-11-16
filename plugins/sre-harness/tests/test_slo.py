@@ -237,7 +237,8 @@ def test_probe_rules_count_missing_samples_as_failure(slo_site):
     base = group["rules"][0]
     assert base["record"] == "slo:sli_error:ratio_rate5m"
     assert base["expr"].endswith("or on() vector(1)")
-    assert 'avg(sum_over_time(probe_success{job="canary"}[5m])) / 5' in base["expr"]
+    assert base["expr"] == '1 - avg(avg_over_time(probe_success{job="canary"}[5m])) or on() vector(1)'
+    assert "sum_over_time" not in base["expr"], "counting samples against an expected number reads jitter as failure"
     assert base["labels"] == {
         "slo": "example-open-app",
         "service": "example-service",

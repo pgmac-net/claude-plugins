@@ -18,7 +18,7 @@ Commands:
 Budget maths, all in recording rules so every reader gets the same numbers:
   error ratio over 5 minutes, then its average over 1h, 6h, 1d and the SLO's
   window; budget remaining = 1 - error ratio over the window / (1 - target).
-  A gauge SLI (a probe) counts missing samples as failures, so a dead prober
+  A gauge SLI (a probe) counts a prober silent for a whole window as failing, so a dead prober
   cannot make a journey look healthy. A counter SLI with no traffic has no
   errors.
 
@@ -258,8 +258,11 @@ def error_ratio_5m(slo: Slo) -> str:
     if slo.counter:
         total = f"sum(rate({slo.total}[{BASE_WINDOW}]))"
         return f"(1 - sum(rate({slo.good}[{BASE_WINDOW}])) / {total}) and on() ({total} > 0) or on() vector(0)"
-    expected = seconds(BASE_WINDOW) / (slo.interval or 60)
-    return f"clamp(1 - avg(sum_over_time({slo.good}[{BASE_WINDOW}])) / {expected:g}, 0, 1) or on() vector(1)"
+    # The share of reported probes that failed. Scrape timing puts four or five one-minute
+    # samples in a five-minute window, so counting samples against an expected number
+    # would read jitter as failure. A prober silent for the whole window still counts as
+    # failing: with no samples the expression is empty and 'or vector(1)' applies.
+    return f"1 - avg(avg_over_time({slo.good}[{BASE_WINDOW}])) or on() vector(1)"
 
 
 def rule_group(slo: Slo) -> dict[str, Any]:
