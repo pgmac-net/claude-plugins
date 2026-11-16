@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import autonomy
 import catalog_check
 import chat_policy
+import slo
 from redact import secret_label
 from sre_common import SITE_ENV, SITE_FILE, Report, SiteError, load_yaml, print_findings, resolve_site, schema_errors
 
@@ -270,6 +271,21 @@ def check_chat(doc: dict[str, Any]) -> tuple[list[str], list[str], dict[str, Any
     )
 
 
+def check_slo(
+    site_root: Path, doc: dict[str, Any], tiers_doc: dict[str, Any] | None
+) -> tuple[list[str], list[str], dict[str, Any] | None]:
+    """Journeys and SLOs must be valid; services whose tier requires journeys are warned about until they have one."""
+    if not doc.get("slo"):
+        return [], [], None
+    catalog_dir = site_root / doc["catalog"]["path"]
+    entities = catalog_check.load_entities(catalog_dir, catalog_check.CatalogReport()) if catalog_dir.is_dir() else []
+    found = slo.load(site_root, doc, {entity.ref for entity in entities})
+    services = {e.ref: e.spec["sre"]["tier"] for e in entities if e.doc["kind"] == "Component" and "sre" in e.spec}
+    tiers = {tier["id"]: tier for tier in (tiers_doc or {}).get("tiers", [])}
+    coverage_warnings, summary = slo.coverage(found, services, tiers)
+    return found.errors, [*found.warnings, *coverage_warnings], summary
+
+
 def check_tiers(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[str, Any], dict[str, Any] | None]:
     """Validate the tier definitions file named by site.yaml. Returns errors, summary and the document."""
     tiers_file = doc.get("tiers_file")
@@ -321,6 +337,9 @@ def validate(site_root: Path) -> Report:
         report.errors.extend(f"catalog: {msg}" for msg in catalog_report.errors)
         report.warnings.extend(f"catalog: {msg}" for msg in catalog_report.warnings)
         catalog_summary = catalog_report.summary
+    slo_errors, slo_warnings, slo_summary = ([], [], None) if path_errors else check_slo(site_root, doc, tiers_doc)
+    report.errors.extend(slo_errors)
+    report.warnings.extend(slo_warnings)
     report.summary = {
         "site": doc["site"]["name"],
         "repos": {alias: repo["visibility"] for alias, repo in doc["repos"].items()},
@@ -332,6 +351,7 @@ def validate(site_root: Path) -> Report:
         "chat_configured": bool(doc.get("chat")),
         "chat": chat_summary,
         "slo_configured": bool(doc.get("slo")),
+        "slo": slo_summary,
         **tier_summary,
     }
     return report

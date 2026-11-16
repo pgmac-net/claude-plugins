@@ -18,7 +18,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 4
+      "const": 5
     },
     "site": {
       "type": "object",
@@ -195,8 +195,70 @@
     },
     "slo": {
       "type": "object",
-      "description": "Reserved for the journeys and SLO milestone. Must be empty in schema version 1.",
-      "maxProperties": 0
+      "description": "Where SLIs are measured and where journeys and SLOs live. Empty means no SLOs. Holds names of credential variables, never credentials.",
+      "additionalProperties": false,
+      "if": {
+        "minProperties": 1
+      },
+      "then": {
+        "required": [
+          "backend",
+          "url",
+          "retention_days",
+          "journeys_path",
+          "rules_file"
+        ]
+      },
+      "properties": {
+        "backend": {
+          "enum": [
+            "prometheus"
+          ],
+          "description": "Query API the SLIs are evaluated by: any Prometheus-compatible one, such as Mimir or Grafana Cloud."
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^(https://[^\\s/@]+(/[^\\s]*)?|http://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?(/[^\\s]*)?)$",
+          "description": "Base URL of the Prometheus API; /api/v1/query is appended. https, or plain http to localhost only: the read token is sent with every query."
+        },
+        "user": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+          "description": "Basic-auth user name, such as a hosted instance ID. Not a secret."
+        },
+        "token_env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Environment variable holding the read token."
+        },
+        "token_file": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+          "description": "Name of a file in ~/.config/sre-harness/ holding the read token, used when token_env is unset. It must be a regular file readable by its owner only."
+        },
+        "retention_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 400,
+          "description": "How long the backend keeps samples, recorded ones included. No SLO window may be longer."
+        },
+        "journeys_path": {
+          "type": "string",
+          "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9_][A-Za-z0-9_./-]*$",
+          "description": "Directory of journey files and their OpenSLO definitions, relative to the site root. No leading /, ~ or .. segments."
+        },
+        "rules_file": {
+          "type": "string",
+          "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9_][A-Za-z0-9_./-]*\\.ya?ml$",
+          "description": "Generated recording rules, relative to the site root. Written by slo.py generate. No leading /, ~ or .. segments."
+        },
+        "rules_namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+          "default": "sre-harness",
+          "description": "Ruler namespace the generated rules are synced into."
+        }
+      }
     },
     "catalog": {
       "type": "object",
