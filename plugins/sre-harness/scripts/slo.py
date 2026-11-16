@@ -265,22 +265,22 @@ def rule_group(slo: Slo) -> dict[str, Any]:
     labels = {"slo": slo.name, "service": slo.service, "journey": slo.journey, "budget": str(slo.budget).lower()}
     selector = f'{{slo="{slo.name}"}}'
     rules: list[dict[str, Any]] = [
-        {"record": f"slo:sli_error:ratio_rate{BASE_WINDOW}", "expr": error_ratio_5m(slo), "labels": labels}
+        {"record": f"slo:sli_error:ratio_rate{BASE_WINDOW}", "expr": error_ratio_5m(slo), "labels": dict(labels)}
     ]
     for window in windows(slo):
         rules.append(
             {
                 "record": f"slo:sli_error:ratio_rate{window}",
                 "expr": f"avg_over_time(slo:sli_error:ratio_rate{BASE_WINDOW}{selector}[{window}])",
-                "labels": labels,
+                "labels": dict(labels),
             }
         )
-    rules.append({"record": "slo:objective:ratio", "expr": f"vector({slo.target:g})", "labels": labels})
+    rules.append({"record": "slo:objective:ratio", "expr": f"vector({slo.target:g})", "labels": dict(labels)})
     rules.append(
         {
             "record": "slo:error_budget:remaining_ratio",
             "expr": f"1 - slo:sli_error:ratio_rate{slo.window}{selector} / {1 - slo.target:.6g}",
-            "labels": labels,
+            "labels": dict(labels),
         }
     )
     return {"name": f"sre-harness-slo-{slo.name}", "interval": "1m", "rules": rules}

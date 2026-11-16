@@ -273,6 +273,7 @@ def test_generate_writes_then_check_passes_then_detects_staleness(slo_site, caps
     doc = yaml.safe_load(rules)
     assert doc["namespace"] == "sre-harness"
     assert doc["groups"][0]["name"] == "sre-harness-slo-example-open-app"
+    assert "&id" not in rules and "*id" not in rules, "a generated file must be plain YAML, no anchors"
     assert slo.main(["--site", str(slo_site), "generate", "--check"]) == 0
     write_slo(slo_site, probe_slo(**{"spec.objectives": [{"target": 0.99}]}))
     assert slo.main(["--site", str(slo_site), "generate", "--check"]) == 1
