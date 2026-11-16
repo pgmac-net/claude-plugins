@@ -52,7 +52,7 @@
             "sre-harness/expected-interval": {
               "type": "string",
               "pattern": "^[1-9][0-9]*[sm]$",
-              "description": "For a gauge indicator (counter: false): how often a sample is expected. Missing samples count as failures."
+              "description": "For a gauge indicator (counter: false): how often a sample is expected. Within a five-minute window only reported samples count, so scrape jitter is not failure; a prober silent for a whole window counts as failing."
             }
           }
         }

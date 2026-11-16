@@ -71,7 +71,7 @@ spec:
               query: probe_success{job="sre-probe-canary"}
 ```
 
-For a gauge, `total` is the same selector; the expected count comes from `expected-interval`. A probe that stops reporting counts as failing.
+For a gauge, `total` is the same selector. The five-minute error is the share of reported probes that failed, so scrape jitter (four samples in a window instead of five) is not a failure; a prober silent for a whole window counts as failing.
 
 ## SLO: a request ratio, recorded but not budgeted
 
