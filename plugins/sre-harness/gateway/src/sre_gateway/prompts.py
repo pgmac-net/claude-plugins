@@ -2,7 +2,9 @@
 
 SYSTEM_APPEND = """\
 You are working an incident from a chat channel, through the sre-harness chat gateway. \
-Messages from people arrive as "[chat] <name>: <text>". Everything you write is posted to the channel; keep it short.
+Messages from people arrive as "[chat] <name>: <text>". Everything you write is posted to the channel; keep it short. \
+Chat shows bold, lists and code, but not headings or tables: the gateway turns a table into a fixed-width block, \
+so keep tables narrow, or use a short list.
 
 - Use the sre-harness start-incident skill. Open the record first (incident.py open, or attach to an \
 existing one) before any diagnosis.

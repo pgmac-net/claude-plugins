@@ -24,9 +24,63 @@ def escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+TABLE_RULE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$")
+HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
+
+
+def _cells(row: str) -> list[str]:
+    """A table row's cells, without the formatting a code block would show literally."""
+    cells = row.strip().strip("|").split("|")
+    return [re.sub(r"\*\*|`", "", cell).strip() for cell in cells]
+
+
+def _table_block(rows: list[str]) -> list[str]:
+    """A Markdown table as an aligned fixed-width block: Slack has no table syntax."""
+    table = [_cells(row) for row in rows if not TABLE_RULE.fullmatch(row)]
+    width = max(len(row) for row in table)
+    table = [row + [""] * (width - len(row)) for row in table]
+    sizes = [max(len(row[i]) for row in table) for i in range(width)]
+    lines = ["  ".join(cell.ljust(sizes[i]) for i, cell in enumerate(row)).rstrip() for row in table]
+    return ["```", *lines, "```"]
+
+
 def to_mrkdwn(text: str) -> str:
-    """The agent writes Markdown; Slack bolds with single asterisks."""
-    return re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
+    """The agent writes Markdown; turn it into what Slack renders.
+
+    Bold uses single asterisks, a heading becomes a bold line, and a table becomes an
+    aligned fixed-width block. Anything inside an existing code block is left alone.
+    """
+    out: list[str] = []
+    lines = text.split("\n")
+    in_code = False
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.lstrip().startswith("```"):
+            in_code = not in_code
+            out.append(line)
+            index += 1
+            continue
+        if (
+            not in_code
+            and TABLE_ROW.fullmatch(line)
+            and index + 1 < len(lines)
+            and TABLE_RULE.fullmatch(lines[index + 1])
+        ):
+            end = index
+            while end < len(lines) and TABLE_ROW.fullmatch(lines[end]):
+                end += 1
+            out.extend(_table_block(lines[index:end]))
+            index = end
+            continue
+        if not in_code:
+            heading = HEADING.fullmatch(line)
+            line = f"**{heading.group(1)}**" if heading else line
+            line = re.sub(r"\*\*(.+?)\*\*", r"*\1*", line)
+        out.append(line)
+        index += 1
+    return "\n".join(out)
 
 
 def _request_blocks(view: ApprovalView, footer: str, buttons: bool) -> list[dict[str, Any]]:
@@ -163,7 +217,7 @@ class SlackAdapter:
         reply = await self._client.chat_postMessage(
             channel=place.channel,
             thread_ts=place.thread,
-            text=to_mrkdwn(text if raw else escape(text)),
+            text=to_mrkdwn(text) if raw else escape(to_mrkdwn(text)),
             unfurl_links=False,
             unfurl_media=False,
         )
