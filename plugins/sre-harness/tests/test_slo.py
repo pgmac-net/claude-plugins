@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import slo
@@ -356,20 +357,23 @@ def test_status_command_needs_a_token(slo_site, monkeypatch, capsys):
 
 
 def test_token_from_env_then_file(tmp_path):
-    token_file = tmp_path / "token"
-    token_file.write_text("from-file\n", encoding="utf-8")
-    settings = {"token_env": "X_TOKEN", "token_file": str(token_file)}
-    assert slo.read_token(settings, {"X_TOKEN": "from-env"}) == "from-env"
-    assert slo.read_token(settings, {}) == "from-file"
+    (tmp_path / "sre-harness").mkdir()
+    token_file = tmp_path / "sre-harness" / "token"
+    token_file.write_text("token-from-file\n", encoding="utf-8")
+    token_file.chmod(0o600)
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    settings = {"token_env": "X_TOKEN", "token_file": "token"}
+    assert slo.read_token(settings, {**env, "X_TOKEN": "token-from-env"}) == "token-from-env"
+    assert slo.read_token(settings, env) == "token-from-file"
     with pytest.raises(SiteError):
-        slo.read_token({"token_env": "X_TOKEN"}, {})
+        slo.read_token({"token_env": "X_TOKEN"}, env)
 
 
 def test_query_error_never_contains_the_token(monkeypatch):
-    def refuse(request, timeout):
+    def refuse(request, **_kwargs):
         raise slo.urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
 
-    monkeypatch.setattr(slo.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(slo, "_OPENER", SimpleNamespace(open=refuse))
     with pytest.raises(SiteError) as error:
         slo.query(SLO_SETTINGS, "up", "very-secret-token")
     assert "HTTP 401" in str(error.value)

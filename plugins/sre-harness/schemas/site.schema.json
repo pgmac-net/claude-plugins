@@ -218,8 +218,8 @@
         },
         "url": {
           "type": "string",
-          "pattern": "^https?://[^\\s]+$",
-          "description": "Base URL of the Prometheus API; /api/v1/query is appended."
+          "pattern": "^(https://[^\\s/@]+(/[^\\s]*)?|http://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?(/[^\\s]*)?)$",
+          "description": "Base URL of the Prometheus API; /api/v1/query is appended. https, or plain http to localhost only: the read token is sent with every query."
         },
         "user": {
           "type": "string",
@@ -233,8 +233,8 @@
         },
         "token_file": {
           "type": "string",
-          "minLength": 1,
-          "description": "File holding the read token, used when token_env is unset. Keep it mode 0600."
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+          "description": "Name of a file in ~/.config/sre-harness/ holding the read token, used when token_env is unset. It must be a regular file readable by its owner only."
         },
         "retention_days": {
           "type": "integer",
@@ -244,13 +244,13 @@
         },
         "journeys_path": {
           "type": "string",
-          "minLength": 1,
-          "description": "Directory of journey files and their OpenSLO definitions, relative to the site root."
+          "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9_][A-Za-z0-9_./-]*$",
+          "description": "Directory of journey files and their OpenSLO definitions, relative to the site root. No leading /, ~ or .. segments."
         },
         "rules_file": {
           "type": "string",
-          "minLength": 1,
-          "description": "Generated recording rules, relative to the site root. Written by slo.py generate."
+          "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9_][A-Za-z0-9_./-]*\\.ya?ml$",
+          "description": "Generated recording rules, relative to the site root. Written by slo.py generate. No leading /, ~ or .. segments."
         },
         "rules_namespace": {
           "type": "string",

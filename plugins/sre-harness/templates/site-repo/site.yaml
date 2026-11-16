@@ -135,7 +135,7 @@ chat: {}
 #   backend: prometheus
 #   url: https://<prometheus host>/api/prom
 #   user: "<instance id>"            # basic-auth user, if the backend needs one
-#   token_env: METRICS_READ_TOKEN     # read-only token; or token_file: ~/.config/sre-harness/metrics-read-token
+#   token_env: METRICS_READ_TOKEN     # read-only token; or token_file: metrics-read-token (in ~/.config/sre-harness/, mode 600)
 #   retention_days: 14
 #   journeys_path: catalog/journeys
 #   rules_file: slo/rules.yaml

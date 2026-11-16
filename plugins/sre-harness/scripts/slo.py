@@ -33,6 +33,7 @@ import base64
 import json
 import os
 import re
+import stat
 import sys
 import urllib.error
 import urllib.parse
@@ -191,17 +192,26 @@ def load(site_root: Path, doc: dict[str, Any], known_refs: set[str] | None = Non
     settings = doc.get("slo") or {}
     if not settings:
         return found
-    root = site_root / settings["journeys_path"]
+    try:
+        root = inside(site_root, settings["journeys_path"])
+    except SiteError as exc:
+        found.errors.append(f"slo/journeys_path: {exc}")
+        return found
     if not root.is_dir():
         found.errors.append(f"slo/journeys_path: {settings['journeys_path']} is not a directory")
         return found
 
+    links = sorted(p for p in root.rglob("*") if p.is_symlink())
+    found.errors.extend(
+        f"{p.relative_to(site_root).as_posix()}: links are not allowed under journeys_path" for p in links
+    )
     for path in sorted(root.rglob("*.md")):
-        if path.name.startswith(("README", "error-budget-policy")) or path.parent == root:
+        if path.name.startswith(("README", "error-budget-policy")) or path.parent == root or path.is_symlink():
             continue
         _load_journey(path, site_root, known_refs, found)
     for path in sorted(root.rglob(f"*{SLO_SUFFIX}")):
-        _load_slo(path, site_root, settings["retention_days"], found)
+        if not path.is_symlink():
+            _load_slo(path, site_root, settings["retention_days"], found)
 
     names = [slo.name for slo in found.slos]
     found.errors.extend(
@@ -285,28 +295,70 @@ def render_rules(slos: list[Slo], namespace: str) -> str:
 # --- status -----------------------------------------------------------------------
 
 
+TOKEN_SHAPE = re.compile(r"^[A-Za-z0-9_.:=+/-]{8,2048}$")
+MAX_TOKEN_FILE = 4096
+
+
+def token_dir(env: dict[str, str] | None = None) -> Path:
+    """The only directory a token file is read from."""
+    env = dict(os.environ) if env is None else env
+    return Path(env.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "sre-harness"
+
+
 def read_token(settings: dict[str, Any], env: dict[str, str] | None = None) -> str:
+    """The read token, from the named variable or from a file in the harness's config directory.
+
+    The file must be a regular file (not a symlink) readable by its owner only,
+    small, and shaped like a token: the token is sent to the backend, so this
+    must not become a way to send some other file there.
+    """
     env = dict(os.environ) if env is None else env
     if settings.get("token_env") and env.get(settings["token_env"]):
-        return env[settings["token_env"]].strip()
-    if settings.get("token_file"):
-        path = Path(settings["token_file"]).expanduser()
-        if path.is_file():
-            return path.read_text(encoding="utf-8").strip()
-    raise SiteError("no metrics read token: set the variable named by slo.token_env, or create slo.token_file")
+        token = env[settings["token_env"]].strip()
+    elif settings.get("token_file"):
+        token = _token_from_file(token_dir(env) / settings["token_file"])
+    else:
+        raise SiteError("no metrics read token: set the variable named by slo.token_env, or create slo.token_file")
+    if not TOKEN_SHAPE.fullmatch(token):
+        raise SiteError("the metrics read token is not a single token-shaped line")
+    return token
+
+
+def _token_from_file(path: Path) -> str:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise SiteError(f"no metrics read token file at {path}") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise SiteError(f"{path} must be a regular file, not a link or anything else")
+    if info.st_mode & 0o077:
+        raise SiteError(f"{path} must be readable by its owner only (chmod 600)")
+    if info.st_size > MAX_TOKEN_FILE:
+        raise SiteError(f"{path} is too large to be a token")
+    return path.read_text(encoding="utf-8").strip()
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: the token must reach only the configured host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: PLR0913, PLR0917  pylint: disable=too-many-arguments,too-many-positional-arguments
+        raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def query(settings: dict[str, Any], promql: str, token: str) -> list[dict[str, Any]]:
     """An instant query against the backend. Raises SiteError with the backend's message, never the token."""
     url = settings["url"].rstrip("/") + "/api/v1/query?" + urllib.parse.urlencode({"query": promql})
-    request = urllib.request.Request(url)  # noqa: S310 - the URL is site configuration, validated as http(s)
+    request = urllib.request.Request(url)  # noqa: S310 - the URL is site configuration, https or localhost only
     if settings.get("user"):
         pair = base64.b64encode(f"{settings['user']}:{token}".encode()).decode()
-        request.add_header("Authorization", f"Basic {pair}")
+        request.add_unredirected_header("Authorization", f"Basic {pair}")
     else:
-        request.add_header("Authorization", f"Bearer {token}")
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(request, timeout=QUERY_TIMEOUT) as response:  # noqa: S310
+        with _OPENER.open(request, timeout=QUERY_TIMEOUT) as response:
             body = json.loads(response.read().decode())
     except urllib.error.HTTPError as exc:
         raise SiteError(f"metrics backend answered HTTP {exc.code}") from exc
@@ -380,8 +432,19 @@ def _known_refs(site_root: Path, doc: dict[str, Any]) -> set[str]:
     return {entity.ref for entity in catalog_check.load_entities(site_root / doc["catalog"]["path"], report)}
 
 
+def inside(site_root: Path, relative: str) -> Path:
+    """A path in the site repository. Refuses anything that resolves outside it, links included."""
+    path = site_root / relative
+    if not path.resolve().is_relative_to(site_root.resolve()):
+        raise SiteError(f"{relative} resolves outside the site repository")
+    return path
+
+
 def _rules_path(site_root: Path, settings: dict[str, Any]) -> Path:
-    return site_root / settings["rules_file"]
+    path = inside(site_root, settings["rules_file"])
+    if path.is_symlink():
+        raise SiteError(f"{settings['rules_file']} is a link; the rules file must be a plain file")
+    return path
 
 
 def cmd_check(_args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
