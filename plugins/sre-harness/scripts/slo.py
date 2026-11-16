@@ -46,6 +46,7 @@ import yaml
 from sre_common import SiteError, guarded, load_site, load_yaml, schema_errors
 
 SLO_SUFFIX = ".slo.yaml"
+SLO_NAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 SELECTOR = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*(\{[^{}`$\\]*\})?$")
 DURATION = re.compile(r"^([1-9][0-9]*)([smhd])$")
 SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -410,7 +411,11 @@ def assess(slo: Slo, values: dict[str, float]) -> dict[str, Any]:
 
 def status(settings: dict[str, Any], slos: list[Slo], token: str) -> list[dict[str, Any]]:
     """One query for all SLOs; then the maths above, per SLO."""
-    names = "|".join(re.escape(slo.name) for slo in slos)
+    # SLO names are [a-z0-9-] by schema, so they need no regex escaping. Python's re.escape
+    # would turn '-' into '\-', an invalid escape inside a PromQL string literal (HTTP 400).
+    if any(not SLO_NAME.fullmatch(slo.name) for slo in slos):
+        raise SiteError("an SLO name has characters the harness does not put into a query")
+    names = "|".join(slo.name for slo in slos)
     rows = query(settings, f'{{__name__=~"slo:sli_error:ratio_rate.+", slo=~"{names}"}}', token) if slos else []
     values: dict[str, dict[str, float]] = {}
     for row in rows:
