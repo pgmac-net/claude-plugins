@@ -47,6 +47,8 @@ HARNESS_CALLS = (
     "validate_site.py",
     "catalog_check.py",
     "kube_read.py",
+    "slo.py status",
+    "slo.py check",
 )
 
 # Read-only commands beyond Claude Code's built-in set. Only commands whose

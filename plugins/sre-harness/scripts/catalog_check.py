@@ -71,6 +71,9 @@ def load_entities(catalog_dir: Path, report: CatalogReport) -> list[Entity]:
         rel = path.relative_to(catalog_dir).as_posix()
         if rel in (IGNORE_FILE, f"{GENERATED_DIR}/{SOURCES_FILE}"):
             continue
+        if path.name.endswith(".slo.yaml"):
+            # OpenSLO definitions beside journeys; slo.py checks them.
+            continue
         try:
             doc = load_yaml(path)
         except SiteError as exc:

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pgmac-net/claude-plugins/plugins/sre-harness/schemas/journey.schema.json",
+  "title": "sre-harness journey front matter",
+  "description": "The YAML front matter of a journey file (<journeys_path>/<service>/<journey>.md). The body is prose for people.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "service",
+    "owner",
+    "steps",
+    "error_budget_policy"
+  ],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "service": {
+      "type": "string",
+      "pattern": "^component:[a-z0-9][a-z0-9-]*$",
+      "description": "Catalog ref of the Component the journey belongs to."
+    },
+    "owner": {
+      "type": "string",
+      "pattern": "^(user|group):[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "depends_on": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^(component|resource|system):[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          "measured_by": {
+            "type": "string",
+            "description": "Which SLI covers this step, or why none does."
+          }
+        }
+      }
+    },
+    "error_budget_policy": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+\\.md$",
+      "description": "Policy file in the same directory."
+    }
+  }
+}

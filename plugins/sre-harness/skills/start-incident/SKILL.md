@@ -46,7 +46,7 @@ A runbook's recovery step is still a mutation. A drill never mutates anything.
 
    Exit 3 means incidents are already open and lists them: attach to the right one (`incident.py attach <id>`) rather than opening a duplicate, or pass `--new` if this is separate. For a practice run add `--drill`. Record the first symptom as a `discovery` entry.
 
-2. **Establish the picture.** Follow the site's `triage` procedures to query monitoring, then answer: what is affected, since when, how badly. Use the catalog (`references/catalog-in-an-incident.md`) to turn a failing host or check into the services it belongs to, their tier, and what depends on them. Set a **provisional** severity from the site's criteria (`incident.severity_criteria`) and update the body:
+2. **Establish the picture.** Follow the site's `triage` procedures to query monitoring, then answer: what is affected, since when, how badly. Use the catalog (`references/catalog-in-an-incident.md`) to turn a failing host or check into the services it belongs to, their tier, and what depends on them. If the site has SLOs, read the affected services' budget state (`uv run <plugin root>/scripts/slo.py status --service component:<name>`): a journey burning fast or exhausted is evidence of user impact, and its attainment is a fact for the record. Set a **provisional** severity from the site's criteria (`incident.severity_criteria`) and update the body:
 
    ```bash
    uv run <plugin root>/scripts/incident.py set --severity P2 --phase Diagnosing --affected "…" --impact "…"

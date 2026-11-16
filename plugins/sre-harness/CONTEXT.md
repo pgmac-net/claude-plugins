@@ -96,6 +96,18 @@ _Avoid_: Allowance, downtime budget
 The agreed consequences of each budget state: healthy, burning fast, exhausted.
 _Avoid_: Freeze policy
 
+**Budget state**:
+Where an SLO's error budget stands now: healthy, burning fast (spending faster than the window allows), exhausted (none left), or unknown (no data).
+_Avoid_: Health, status colour
+
+**Canary**:
+A minimal backend that exists only to be probed, so a probe's failure means the path to it failed, not an application.
+_Avoid_: Test app, dummy service
+
+**Probe**:
+A synthetic request made on a schedule from outside what it measures; its success ratio is an SLI. A probe that stops reporting counts as failing.
+_Avoid_: Ping, health check
+
 ### Incidents
 
 **Incident**:

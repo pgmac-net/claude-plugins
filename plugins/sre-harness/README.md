@@ -142,6 +142,21 @@ Three triggers, all optional and all safe to miss:
 
 Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`create-pir`).
 
+## Journeys and SLOs
+
+Ask the agent to "define a journey" (`define-journey`) for a service. It writes `<journeys_path>/<service>/<journey>.md`, an OpenSLO file per SLI beside it, and the service's error-budget policy, then generates Prometheus recording rules (`slo.py generate`) for the site to sync into its metrics backend. `slo.py status` reports each SLO's attainment, budget remaining and state (healthy, burning fast, exhausted) from those recorded series, so every reader gets the same numbers. Design: [ADR 0014](docs/adr/0014-short-slo-windows-and-our-own-rule-generator.md).
+
+**Windows must fit the backend's retention.** Recorded series are kept no longer than raw ones. Grafana Cloud's free tier, measured for the first site on 2026-11-16:
+
+| Limit | Free tier |
+|---|---|
+| Active metric series | 10,000 |
+| Retention (metrics, logs, traces) | 14 days |
+| Synthetic Monitoring | 100k API test runs a month |
+| Rule groups / rules per group | 35 / 20 by default (not stated per tier) |
+
+So use 7-day windows on it, and keep SLI series few: filter at the scraper so only what the SLIs need is shipped. If usage approaches the series cap, in order: tighten the scraper filters; drop request-ratio SLIs and keep the probes; move SLIs to a separate stack. A Tier 1 service with no journey is a warning in `validate_site.py`; a broken journey or SLO file is an error.
+
 **From chat.** With a `chat` section in `site.yaml` and the gateway running, a responder starts an incident with `/incident <text>` in Slack. The agent works it in a private channel. Every command that isn't pre-approved waits for a listed approver's click, which is recorded in the audit log. Setup and the threat model: [gateway/README.md](gateway/README.md).
 
 ## Contents
@@ -151,9 +166,10 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 | `skills/site-check/` | Finds and validates the site; shared reference for loading site configuration |
 | `skills/catalog-sync/` | Regenerates the generated layer, reports drift, proposes a pull request |
 | `skills/describe-service/` | Interviews the user and writes one service entry |
+| `skills/define-journey/` | Interviews the owner and writes a journey, its OpenSLO definitions and its error-budget policy |
 | `skills/start-incident/` | Works a live incident: record, triage, gated recovery, typed timeline |
 | `skills/create-pir/` | Writes the post-incident review from the timeline |
-| `schemas/` | JSON Schema for `site.yaml` (version 4), tier definitions, catalog entities and the pre-approved action list |
+| `schemas/` | JSON Schema for `site.yaml` (version 5), journey front matter, the supported OpenSLO subset, tier definitions, catalog entities and the pre-approved action list |
 | `scripts/validate_site.py` | Site validation: schema, paths, references, audit privacy, secret shapes, catalog |
 | `scripts/catalog_sync.py` | Source adapters and the generated layer |
 | `scripts/catalog_check.py` | Entity validation and drift report |
@@ -164,6 +180,7 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 | `scripts/autonomy.py` | Decides whether a command is a pre-approved action, and executes it without a shell |
 | `scripts/assist.py` | Optional advisory second opinions from a judgment model, with masking |
 | `scripts/chat_policy.py` | Tool policy for an agent driven from chat: the read-only allow-list, the deny-list, checks on a site's additions |
+| `scripts/slo.py` | Journeys and SLOs: `check`, `generate` (recording rules), `status` (attainment, budget remaining, budget state) |
 | `scripts/kube_read.py` | Read-only kubectl for an agent driven from chat: allowed verbs and options only, checked per argument, no shell |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
@@ -175,6 +192,8 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 Scripts need [`uv`](https://docs.astral.sh/uv/); dependencies are declared inline. Catalog sync also needs `git`, and `helm` for chart areas. The incident scripts need the `gh` CLI, signed in.
 
 ## Upgrading a site
+
+**From schema version 4 to 5.** Set `schema_version: 5`. `slo: {}` stays valid and means no SLOs; the template shows a filled-in `slo` section.
 
 **From schema version 3 to 4.** Set `schema_version: 4`. `chat: {}` stays valid and means no chat gateway; the template shows a filled-in `chat` section.
 

@@ -1,6 +1,6 @@
 # sre-harness site configuration. Validate with the plugin's scripts/validate_site.py.
 # Never put a secret here: name the environment variable that holds it.
-schema_version: 4
+schema_version: 5
 
 site:
   name: example
@@ -128,5 +128,15 @@ incident:
 #     app_token: SLACK_APP_TOKEN
 chat: {}
 
-# Reserved. Filled in by a later schema version.
+# Journeys and SLOs (skill define-journey, script slo.py). Empty means none.
+# SLIs are evaluated by a Prometheus-compatible backend. No SLO window may be
+# longer than retention_days; on a 14-day free tier, use 7d windows.
+# slo:
+#   backend: prometheus
+#   url: https://<prometheus host>/api/prom
+#   user: "<instance id>"            # basic-auth user, if the backend needs one
+#   token_env: METRICS_READ_TOKEN     # read-only token; or token_file: ~/.config/sre-harness/metrics-read-token
+#   retention_days: 14
+#   journeys_path: catalog/journeys
+#   rules_file: slo/rules.yaml
 slo: {}
