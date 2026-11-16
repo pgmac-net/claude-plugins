@@ -252,6 +252,11 @@
           "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9_][A-Za-z0-9_./-]*\\.ya?ml$",
           "description": "Generated recording rules, relative to the site root. Written by slo.py generate. No leading /, ~ or .. segments."
         },
+        "dashboard_file": {
+          "type": "string",
+          "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9_][A-Za-z0-9_./-]*\\.json$",
+          "description": "Generated Grafana dashboard for every SLO, relative to the site root. Written by slo.py dashboard. No leading /, ~ or .. segments."
+        },
         "rules_namespace": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",

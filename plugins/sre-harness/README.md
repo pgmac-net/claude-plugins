@@ -144,7 +144,7 @@ Ask the agent to "start an incident" (`start-incident`) or "create a PIR" (`crea
 
 ## Journeys and SLOs
 
-Ask the agent to "define a journey" (`define-journey`) for a service. It writes `<journeys_path>/<service>/<journey>.md`, an OpenSLO file per SLI beside it, and the service's error-budget policy, then generates Prometheus recording rules (`slo.py generate`) for the site to sync into its metrics backend. `slo.py status` reports each SLO's attainment, budget remaining and state (healthy, burning fast, exhausted) from those recorded series, so every reader gets the same numbers. Design: [ADR 0014](docs/adr/0014-short-slo-windows-and-our-own-rule-generator.md).
+Ask the agent to "define a journey" (`define-journey`) for a service. It writes `<journeys_path>/<service>/<journey>.md`, an OpenSLO file per SLI beside it, and the service's error-budget policy, then generates Prometheus recording rules (`slo.py generate`) for the site to sync into its metrics backend. `slo.py status` reports each SLO's attainment, budget remaining and state (healthy, burning fast, exhausted) from those recorded series, so every reader gets the same numbers. `slo.py dashboard` writes a Grafana dashboard (one row per SLO: attainment, budget left, burn rates, history) from the same definitions, reading only those recorded series; a site syncs it the way it syncs the rules. Design: [ADR 0014](docs/adr/0014-short-slo-windows-and-our-own-rule-generator.md).
 
 **Windows must fit the backend's retention.** Recorded series are kept no longer than raw ones. Grafana Cloud's free tier, measured for the first site on 2026-11-16:
 

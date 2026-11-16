@@ -39,9 +39,10 @@ Write, then check, then generate:
 ```bash
 uv run <plugin root>/scripts/slo.py check
 uv run <plugin root>/scripts/slo.py generate
+uv run <plugin root>/scripts/slo.py dashboard    # if the site sets slo.dashboard_file
 ```
 
-`check` must pass with no errors. Commit the journey, its `.slo.yaml` files, the policy and the regenerated rules file together, on a branch, and propose them as a pull request.
+`check` must pass with no errors. Commit the journey, its `.slo.yaml` files, the policy, the regenerated rules file and (if the site has one) the regenerated dashboard together, on a branch, and propose them as a pull request.
 
 After the rules are synced to the backend, confirm data arrives:
 
