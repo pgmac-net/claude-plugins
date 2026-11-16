@@ -347,7 +347,9 @@ def test_status_queries_once_and_maps_results(monkeypatch, slo_site):
     found = slo.load(slo_site, site_doc(slo_site), REFS)
     result = slo.status(SLO_SETTINGS, found.slos, "token")
     assert len(seen) == 1
-    assert 'slo=~"example\\-open\\-app"' in seen[0] or 'slo=~"example-open-app"' in seen[0]
+    # No backslashes: '\-' is an invalid escape in a PromQL string, and the backend answers 400.
+    assert 'slo=~"example-open-app"' in seen[0]
+    assert "\\" not in seen[0]
     assert result[0]["state"] == "healthy"
 
 
