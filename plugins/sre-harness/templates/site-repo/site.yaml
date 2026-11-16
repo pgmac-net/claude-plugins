@@ -139,4 +139,5 @@ chat: {}
 #   retention_days: 14
 #   journeys_path: catalog/journeys
 #   rules_file: slo/rules.yaml
+#   dashboard_file: slo/dashboard.json   # optional: slo.py dashboard writes a Grafana dashboard for every SLO
 slo: {}

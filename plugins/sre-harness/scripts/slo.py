@@ -13,6 +13,8 @@ site repository, except for 'status', which queries the metrics backend.
 Commands:
   check     validate journeys and SLOs against their schemas and the catalog
   generate  write the recording rules (--check: fail if the file is stale)
+  dashboard write a Grafana dashboard for every SLO, reading the recorded series
+            (--check: fail if the file is stale)
   status    attainment, budget remaining and budget state for each SLO
 
 Budget maths, all in recording rules so every reader gets the same numbers:
@@ -498,6 +500,36 @@ def cmd_generate(args: argparse.Namespace, site_root: Path, doc: dict[str, Any])
     return 0
 
 
+def cmd_dashboard(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
+    settings = doc.get("slo") or {}
+    if not settings.get("dashboard_file"):
+        raise SiteError("site.yaml has no slo.dashboard_file")
+    found = load(site_root, doc, _known_refs(site_root, doc))
+    if found.errors:
+        print(json.dumps({"ok": False, "errors": found.errors}, indent=2))
+        return 1
+    import slo_dashboard  # noqa: PLC0415  pylint: disable=import-outside-toplevel
+
+    rendered = slo_dashboard.render(found.slos)
+    path = inside(site_root, settings["dashboard_file"])
+    if path.is_symlink():
+        raise SiteError(f"{settings['dashboard_file']} is a link; the dashboard file must be a plain file")
+    current = path.read_text(encoding="utf-8") if path.is_file() else None
+    if args.check:
+        if current != rendered:
+            print(f"{settings['dashboard_file']} is stale; run: slo.py dashboard", file=sys.stderr)
+            return 1
+        print(f"{settings['dashboard_file']} is up to date")
+        return 0
+    if current != rendered:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(rendered, encoding="utf-8")
+        print(f"wrote {settings['dashboard_file']} ({len(found.slos)} SLO(s))")
+    else:
+        print(f"{settings['dashboard_file']} unchanged")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
     settings = doc.get("slo") or {}
     if not settings:
@@ -523,6 +555,9 @@ def build_parser() -> argparse.ArgumentParser:
     generate = sub.add_parser("generate", help="write the recording rules")
     generate.add_argument("--check", action="store_true", help="fail if the rules file is stale; write nothing")
     generate.set_defaults(run=cmd_generate)
+    dashboard = sub.add_parser("dashboard", help="write the Grafana dashboard for every SLO")
+    dashboard.add_argument("--check", action="store_true", help="fail if the dashboard file is stale; write nothing")
+    dashboard.set_defaults(run=cmd_dashboard)
     stat = sub.add_parser("status", help="attainment, budget remaining and state per SLO")
     stat.add_argument("--service", help="only this service (name or component:<name>)")
     stat.add_argument("--slo", help="only this SLO")
