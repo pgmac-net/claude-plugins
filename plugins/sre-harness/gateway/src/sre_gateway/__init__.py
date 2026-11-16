@@ -6,4 +6,4 @@ and records approvers' decisions in the incident's audit log. It holds no
 model logic and opens no inbound port.
 """
 
-__version__ = "0.9.2"
+__version__ = "0.9.3"

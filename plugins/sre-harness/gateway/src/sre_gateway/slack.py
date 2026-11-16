@@ -24,20 +24,52 @@ def escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
-TABLE_RULE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$")
-HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
+# The agent's text is untrusted input to these checks, so none of them uses a pattern
+# that can backtrack: rows and headings are parsed with string operations, the one
+# pattern left is anchored and unambiguous, and lines longer than this are passed
+# through untouched.
+MAX_CONVERTED_LINE = 2000
+RULE_CELL = re.compile(r":?-{3,}:?")
+
+
+def _is_table_row(line: str) -> bool:
+    stripped = line.strip()
+    return len(stripped) >= 2 and stripped.startswith("|") and stripped.endswith("|")
+
+
+def _is_table_rule(line: str) -> bool:
+    """The '|---|:---:|' line under a table's header."""
+    stripped = line.strip().strip("|")
+    return bool(stripped) and all(RULE_CELL.fullmatch(cell.strip()) for cell in stripped.split("|"))
+
+
+def _heading(line: str) -> str | None:
+    """The text of a Markdown heading ('# Title', '## Title ##'), or None."""
+    level = len(line) - len(line.lstrip("#"))
+    if not 1 <= level <= 6 or line[level : level + 1] not in (" ", "\t"):
+        return None
+    text = line[level:].strip().rstrip("#").strip()
+    return text or None
+
+
+def _bold(line: str) -> str:
+    """Markdown '**bold**' to Slack '*bold*'. An unpaired '**' is left as it is."""
+    parts = line.split("**")
+    if len(parts) < 3:
+        return line
+    paired = len(parts) if len(parts) % 2 else len(parts) - 1
+    return "*".join(parts[:paired]) + "".join(f"**{part}" for part in parts[paired:])
 
 
 def _cells(row: str) -> list[str]:
     """A table row's cells, without the formatting a code block would show literally."""
     cells = row.strip().strip("|").split("|")
-    return [re.sub(r"\*\*|`", "", cell).strip() for cell in cells]
+    return [cell.replace("**", "").replace("`", "").strip() for cell in cells]
 
 
 def _table_block(rows: list[str]) -> list[str]:
     """A Markdown table as an aligned fixed-width block: Slack has no table syntax."""
-    table = [_cells(row) for row in rows if not TABLE_RULE.fullmatch(row)]
+    table = [_cells(row) for row in rows if not _is_table_rule(row)]
     width = max(len(row) for row in table)
     table = [row + [""] * (width - len(row)) for row in table]
     sizes = [max(len(row[i]) for row in table) for i in range(width)]
@@ -62,23 +94,19 @@ def to_mrkdwn(text: str) -> str:
             out.append(line)
             index += 1
             continue
-        if (
-            not in_code
-            and TABLE_ROW.fullmatch(line)
-            and index + 1 < len(lines)
-            and TABLE_RULE.fullmatch(lines[index + 1])
-        ):
+        if in_code or len(line) > MAX_CONVERTED_LINE:
+            out.append(line)
+            index += 1
+            continue
+        if _is_table_row(line) and index + 1 < len(lines) and _is_table_rule(lines[index + 1]):
             end = index
-            while end < len(lines) and TABLE_ROW.fullmatch(lines[end]):
+            while end < len(lines) and len(lines[end]) <= MAX_CONVERTED_LINE and _is_table_row(lines[end]):
                 end += 1
             out.extend(_table_block(lines[index:end]))
             index = end
             continue
-        if not in_code:
-            heading = HEADING.fullmatch(line)
-            line = f"**{heading.group(1)}**" if heading else line
-            line = re.sub(r"\*\*(.+?)\*\*", r"*\1*", line)
-        out.append(line)
+        heading = _heading(line)
+        out.append(f"*{heading}*" if heading else _bold(line))
         index += 1
     return "\n".join(out)
 

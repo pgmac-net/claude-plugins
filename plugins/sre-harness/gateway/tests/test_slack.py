@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import time
+
+import pytest
+
 from sre_gateway import slack
 from sre_gateway.chat import ApprovalView, Place
 
@@ -107,3 +111,37 @@ async def test_table_cells_are_escaped_after_alignment():
     text = chat._client.calls[0]["text"]  # pylint: disable=protected-access
     assert "<!channel>" not in text
     assert "x &gt; y" in text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# a" + " " * 20000 + "b" + " " * 20000 + "#x",
+        "## " + "# " * 20000,
+        "**a" * 20000,
+        "**" + "a " * 20000 + "*",
+        "|" + " |" * 20000,
+        "| a |\n|" + "-" * 20000 + "|x",
+        ("| a | b |\n|---|---|\n" + "| x | y |\n" * 2000),
+    ],
+)
+def test_conversion_takes_linear_time_on_hostile_text(text):
+    """The agent's text is untrusted: no input may make the gateway hang."""
+    started = time.perf_counter()
+    slack.to_mrkdwn(text)
+    assert time.perf_counter() - started < 1.0
+
+
+def test_bold_pairs_and_leaves_an_unpaired_marker():
+    assert slack.to_mrkdwn("**a** and **b** and **c") == "*a* and *b* and **c"
+
+
+def test_heading_with_closing_hashes():
+    assert slack.to_mrkdwn("### Budget ###") == "*Budget*"
+    assert slack.to_mrkdwn("#not a heading") == "#not a heading"
+    assert slack.to_mrkdwn("####### seven") == "####### seven"
+
+
+def test_very_long_lines_pass_through():
+    line = "**" + "x" * 3000 + "**"
+    assert slack.to_mrkdwn(line) == line
