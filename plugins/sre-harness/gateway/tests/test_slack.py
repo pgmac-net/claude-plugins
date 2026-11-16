@@ -65,3 +65,45 @@ def test_closed_request_has_no_buttons():
     view = ApprovalView("r1", "Bash", "touch x", None, 300)
     blocks = slack._request_blocks(view, "Approved by someone.", buttons=False)  # pylint: disable=protected-access
     assert all(block["type"] != "actions" for block in blocks)
+
+
+TABLE = """Here it is:
+
+| SLO | Target / window | State |
+|---|---|---|
+| ingress-open-internal-web-app (**spends budget**) | 99.5% / 7d | `healthy` |
+| ingress-requests | 99% / 7d | informational |
+
+Done."""
+
+
+def test_a_markdown_table_becomes_an_aligned_block():
+    rendered = slack.to_mrkdwn(TABLE)
+    assert "|" not in rendered
+    assert "---" not in rendered
+    block = rendered.split("```")[1].strip("\n").splitlines()
+    assert block[0].startswith("SLO")
+    assert block[1].startswith("ingress-open-internal-web-app (spends budget)")
+    assert block[0].index("Target") == block[1].index("99.5%") == block[2].index("99% / 7d")
+    assert rendered.startswith("Here it is:") and rendered.endswith("Done.")
+
+
+def test_headings_become_bold_lines():
+    assert slack.to_mrkdwn("## Where it stands\nok") == "*Where it stands*\nok"
+
+
+def test_code_blocks_are_left_alone():
+    text = "```\n| a | b |\n|---|---|\n**x**\n```"
+    assert slack.to_mrkdwn(text) == text
+
+
+def test_pipes_in_prose_are_not_a_table():
+    assert slack.to_mrkdwn("a | b") == "a | b"
+
+
+async def test_table_cells_are_escaped_after_alignment():
+    chat = adapter()
+    await chat.post(Place("C1"), "| a | b |\n|---|---|\n| x > y | <!channel> |")
+    text = chat._client.calls[0]["text"]  # pylint: disable=protected-access
+    assert "<!channel>" not in text
+    assert "x &gt; y" in text
