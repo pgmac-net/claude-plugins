@@ -195,7 +195,7 @@
     },
     "runner": {
       "type": "object",
-      "description": "Unattended triage (homelabia#241). The chat gateway polls one alert source and, for new unhandled problems on services in the listed tiers, starts an agent session that may only read, open a private incident record and propose a fix. Needs a chat section. Empty means no runner.",
+      "description": "Unattended triage. The chat gateway polls one alert source and, for new unhandled problems on services in the listed tiers, starts an agent session that may only read, open a private incident record and propose a fix. Needs a chat section. Empty means no runner.",
       "additionalProperties": false,
       "if": {
         "minProperties": 1
