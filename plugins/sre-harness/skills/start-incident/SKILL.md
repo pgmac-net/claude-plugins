@@ -1,7 +1,7 @@
 ---
 name: start-incident
 description: This skill should be used when the user says "start an incident", "we have an incident", "incident on <host or service>", "something's down", "run an incident drill", reports a live production problem, or asks for a handover or summary of an incident in progress. Takes a free-text description of the problem and drives triage, diagnosis and gated recovery, keeping a typed timeline that the create-pir skill consumes once the incident is resolved.
-version: 0.7.0
+version: 0.8.0
 ---
 
 # Start Incident
@@ -91,6 +91,10 @@ If `due` is true, post an `update` entry now: current state, what changed since 
 
 **Handover**, when the user asks or someone else takes over: `timeline.py handover` with its five fields. **Summary**, on request: read `timeline.py export`, then post a `summary` entry in your own words.
 
+## Started by an alert
+
+If the session began with an `[alert]` message, it is an unattended triage. You may only read, open a private record (`open --auto`), write its timeline and propose a fix, until a responder speaks. After that, promoting or dismissing the incident is their call. Read `references/unattended-triage.md` before anything else.
+
 ## A second opinion, if the site has one
 
 Some sites enable an advisory helper for three questions: a severity suggestion, a ranking of runbooks to read, and a timeline entry's type. It advises only; it never approves or selects anything. If it says `"available": false`, carry on without it. When and how: `references/assist.md`.
@@ -113,6 +117,7 @@ A hook records every tool call you make while the incident is open; you do not w
 - `references/incident-record.md` — the tracking issue, entry types, handover and summary formats, script usage
 - `references/assist.md` — the advisory helper: when to ask, what it must never decide, what leaves the machine
 - `references/autonomy.md` — pre-approved actions: how the match works, what to do with each answer
+- `references/unattended-triage.md` — a session started by an alert: triage-only rules, the summary it ends with, promote and dismiss
 - `references/audit-log.md` — what the hook captures, recording approvals, verifying and committing the log
 - `references/catalog-in-an-incident.md` — using the catalog to find what is affected and what to read
 - `../site-check/references/site-config.md` — loading site configuration

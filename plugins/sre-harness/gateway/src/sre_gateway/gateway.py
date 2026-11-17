@@ -29,8 +29,9 @@ from sre_gateway.agent import (
     ToolOutput,
     TurnEnd,
 )
-from sre_gateway.approvals import ApprovalBroker, Recorder
+from sre_gateway.approvals import ApprovalBroker, Decision, Recorder
 from sre_gateway.chat import ChatAdapter, Click, Command, Incoming, NameTaken, Place, Posted
+from sre_gateway.runner import Alert, Runner
 from sre_gateway.store import Conversation, Store
 from sre_gateway.tracker import Tracker
 
@@ -40,6 +41,18 @@ CHUNK = 3500
 ARCHIVE_CHECK_SECONDS = 3600
 MAX_TRACKED_CALLS = 200
 STATUS_WORDS = frozenset({"status", "!status"})
+TRIAGE, CHAT = "triage-only", "chat"
+RUNNER_NAME = "the alert source"
+DRILL_ALERT = re.compile(r"^alert\s+(\S+)\s*(.*)$", re.IGNORECASE | re.DOTALL)
+TRIAGE_REFUSAL = (
+    "Refused without asking: this is an unattended triage, which may only read, keep its record and propose a fix. "
+    "Do not retry; say in the summary what this would have checked or changed."
+)
+
+PolicyChange = harness.audit.PolicyChange
+PolicyRecorder = Callable[[PolicyChange], None]
+# (permission callback, triage-only) -> a driver
+DriverFactory = Callable[[AskPermission, bool], AgentDriver]
 
 
 @dataclass(frozen=True)
@@ -101,15 +114,22 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         *,
         chat: ChatAdapter,
         tracker: Tracker,
-        driver_factory: Callable[[AskPermission], AgentDriver],
+        driver_factory: DriverFactory,
         record: Recorder,
         scrub: Callable[[str], str],
+        runner: Runner | None = None,
+        record_policy: PolicyRecorder | None = None,
     ):
         self.settings = settings
         self.chat = chat
         self.tracker = tracker
+        self.runner = runner
         self._driver_factory = driver_factory
+        self._record_decision = record
+        self._record_policy = record_policy
         self._scrub = scrub
+        self._poller: asyncio.Task | None = None
+        self._source_failing = False
         self.broker = ApprovalBroker(
             chat, approvers=settings.approvers, ttl_seconds=settings.approval_ttl, record=record, scrub=scrub
         )
@@ -129,14 +149,17 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
     async def run(self) -> None:
         self.load()
         self._archiver = asyncio.create_task(self._archive_loop())
+        if self.runner is not None and self.runner.settings.enabled:
+            self._poller = asyncio.create_task(self._poll_loop())
         try:
             await self.chat.start(self)
         finally:
             await self.shutdown()
 
     async def shutdown(self) -> None:
-        if self._archiver:
-            self._archiver.cancel()
+        for task in (self._archiver, self._poller):
+            if task:
+                task.cancel()
         for session in list(self.sessions.values()):
             if session.worker:
                 session.worker.cancel()
@@ -163,6 +186,14 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         text, drill = self._drill(command.text)
         if not text:
             await self.chat.tell(Place(command.channel), command.user, "Usage: /incident [drill] <what is broken>")
+            return
+        alert = DRILL_ALERT.match(text) if drill else None
+        if alert:
+            if self.runner is None:
+                await self.chat.tell(Place(command.channel), command.user, "This site has no runner configured.")
+                return
+            # A drill of the alert path: the made-up alert starts a triage-only session, as a real one would.
+            await self._start_triage([self.runner.drill(alert.group(1), alert.group(2).strip())], drill=True)
             return
         name = await self._name(command.user)
         kind = "a drill" if drill else "an incident"
@@ -225,9 +256,106 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         name = await self._name(message.user)
         if session.conv.incident:
             await self._mirror(session, message, name)
+        if session.conv.policy == TRIAGE:
+            await self._end_triage(session, message, name)
+            await session.queue.put(prompts.joined_message(name, text))
+            return
         if session.busy:
             await self.chat.tell(session.place, message.user, "Queued: the agent is still on the previous message.")
         await session.queue.put(f"[chat] {name}: {text}")
+
+    # --- unattended triage ---------------------------------------------------------
+
+    def _open_sessions(self, drill: bool) -> list[Session]:
+        """Conversations still being worked, real or drill; a resolved-and-archived one is gone."""
+        return [s for s in self.sessions.values() if not s.conv.archived and s.conv.drill == drill]
+
+    async def on_alerts(self, alerts: list[Alert]) -> None:
+        """New qualifying problems from one poll: into an open incident, else one new triage, else a notice."""
+        if not alerts or self.runner is None:
+            return
+        lines = [alert.line() for alert in alerts]
+        open_now = self._open_sessions(drill=False)
+        if open_now:
+            # The newest open incident hears about them; whether they belong to it is the agent's (and people's) call.
+            session = open_now[-1]
+            await self._say(session.place, "New alerts while this incident is open:\n" + "\n".join(lines))
+            await session.queue.put(prompts.alert_in_incident(lines))
+        else:
+            live_auto = [s for s in self.sessions.values() if s.conv.auto and not s.conv.archived]
+            if len(live_auto) >= self.runner.settings.max_auto_sessions:
+                await self._announce("Triage capacity is full; not starting one for:\n" + "\n".join(lines))
+                return
+            await self._start_triage(alerts, drill=False)
+        self.runner.mark(alerts)
+
+    async def _start_triage(self, alerts: list[Alert], drill: bool) -> None:
+        lines = [alert.line() for alert in alerts]
+        kind = "Drill: unattended triage" if drill else "Unattended triage"
+        posted = await self.chat.post(
+            Place(self.settings.hub), self._scrub(f"{kind} started for:\n" + "\n".join(lines))
+        )
+        place = Place(self.settings.hub, posted.ts)
+        conv = Conversation(
+            key=f"{place.channel}:{place.thread}",
+            channel=place.channel,
+            thread=place.thread,
+            drill=drill,
+            started_by=RUNNER_NAME,
+            auto=True,
+            policy=TRIAGE,
+        )
+        session = self._add(conv)
+        self._save()
+        await session.queue.put(prompts.alert_message(lines, drill))
+
+    async def _end_triage(self, session: Session, message: Incoming, name: str) -> None:
+        """A responder has spoken: the session leaves triage-only, once and for good, on the record."""
+        conv = session.conv
+        link = None
+        with contextlib.suppress(Exception):
+            link = await self.chat.permalink(Posted(message.channel, message.ts))
+        if conv.incident and self._record_policy is not None:
+            try:
+                self._record_policy(
+                    PolicyChange(conv.incident, conv.session_id, TRIAGE, CHAT, f"{name} ({message.user})", link)
+                )
+            except Exception as exc:  # noqa: BLE001  pylint: disable=broad-exception-caught
+                log.exception("could not record the policy change")
+                session.last_problem = f"recording the policy change failed: {type(exc).__name__}"
+        conv.policy = CHAT
+        self._save()
+        # The running agent was started with the triage-only rules; the next turn starts it again with the chat rules.
+        if session.busy:
+            session.release_after_turn = True
+        else:
+            await self._park(session)
+        await self.chat.post(
+            session.place,
+            f"{name} has joined: this session is no longer triage-only. "
+            "Commands outside the allow-list now raise approval requests.",
+        )
+
+    async def _poll_loop(self) -> None:
+        assert self.runner is not None  # noqa: S101 - started only with a runner
+        while True:
+            await self.poll_once()
+            await asyncio.sleep(self.runner.settings.poll_seconds)
+
+    async def poll_once(self) -> None:
+        assert self.runner is not None  # noqa: S101 - called only with a runner
+        try:
+            selection = await self.runner.poll(starting=not self._open_sessions(drill=False))
+        except Exception as exc:  # noqa: BLE001  pylint: disable=broad-exception-caught
+            log.exception("polling the alert source failed")
+            if not self._source_failing:
+                self._source_failing = True
+                await self._announce(f"The alert source could not be read ({type(exc).__name__}); triage is paused.")
+            return
+        if self._source_failing:
+            self._source_failing = False
+            await self._announce("The alert source is readable again; triage resumes.")
+        await self.on_alerts(selection.start)
 
     async def _mirror(self, session: Session, message: Incoming, name: str) -> None:
         """Copy a person's message to the tracking issue, so the issue stays the record."""
@@ -254,6 +382,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             agent = "stopped (the next message resumes it)" if conv.session_id else "not started"
         lines = [
             f"Incident: {conv.incident or 'not opened yet'}{' (drill)' if conv.drill else ''}",
+            f"Started by: {'the alert source' if conv.auto else 'a responder'}; policy: {conv.policy}",
             f"Agent: {agent}; messages queued: {session.queue.qsize()}",
             f"Approval requests open: {self.broker.open_requests}",
             f"Agent sessions in use: {self._live} of {self.settings.max_sessions}",
@@ -293,7 +422,9 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
                 session.place, "All agent sessions are in use; this one starts as soon as one is free."
             )
         await self._slots.acquire()
-        driver = self._driver_factory(lambda tool, data, call_id: self._ask(session, tool, data, call_id))
+        driver = self._driver_factory(
+            lambda tool, data, call_id: self._ask(session, tool, data, call_id), session.conv.policy == TRIAGE
+        )
         try:
             await driver.start(session.conv.session_id)
         except Exception as exc:  # noqa: BLE001  pylint: disable=broad-exception-caught
@@ -352,14 +483,23 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         if call is None or call.name != "Bash" or event.is_error:
             return
         kind = harness.incident_call(str(call.input.get("command", "")))
-        if kind in ("open", "attach"):
+        if kind in ("open", "attach", "promote"):
             state = harness.opened_incident(event.text)
             if state:
+                before = session.conv.incident
                 await self._incident_opened(session, state)
+                if kind == "promote" and before:
+                    await self._announce(
+                        f"Unattended triage {before} promoted to incident {state['id']}: {state.get('url')}"
+                    )
         elif kind == "close" and session.conv.incident:
             await self._announce(f"{self._label(session)} {session.conv.incident} resolved: {session.conv.title}")
+        elif kind == "dismiss" and session.conv.incident:
+            await self._announce(f"Unattended triage {session.conv.incident} dismissed: not an incident.")
 
     async def _ask(self, session: Session, tool: str, tool_input: dict[str, Any], tool_use_id: str) -> PermissionAnswer:
+        if session.conv.policy == TRIAGE:
+            return self._refuse_in_triage(session, tool, tool_input, tool_use_id)
         link = None
         if session.last_text is not None:
             with contextlib.suppress(Exception):
@@ -372,6 +512,29 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             tool_use_id=tool_use_id,
             statement_link=link,
         )
+
+    def _refuse_in_triage(
+        self, session: Session, tool: str, tool_input: dict[str, Any], tool_use_id: str
+    ) -> PermissionAnswer:
+        """No approval request in an unattended triage: the call is refused, and the refusal is on the record."""
+        if session.conv.incident:
+            try:
+                self._record_decision(
+                    Decision(
+                        incident=session.conv.incident,
+                        outcome="refused",
+                        tool=tool,
+                        tool_input=tool_input,
+                        tool_use_id=tool_use_id,
+                        approver=None,
+                        link=None,
+                        reason="triage-only session",
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001  pylint: disable=broad-exception-caught
+                log.exception("could not record a triage refusal")
+                session.last_problem = f"recording a refusal failed: {type(exc).__name__}"
+        return PermissionAnswer(False, TRIAGE_REFUSAL)
 
     # --- incidents -----------------------------------------------------------------
 

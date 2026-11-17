@@ -25,6 +25,7 @@ class Config:
     doc: dict[str, Any]
     chat: dict[str, Any]
     tokens: dict[str, str] = field(repr=False)
+    runner_auth: tuple[str, str] | None = field(default=None, repr=False)
     mcp_config: Path | None = None
     model: str | None = None
     state_dir: Path = field(default_factory=lambda: harness.sre_common.state_dir() / "gateway")
@@ -53,12 +54,18 @@ class Config:
     def max_sessions(self) -> int:
         return int(self.chat.get("max_sessions", 2))
 
+    @property
+    def runner(self) -> dict[str, Any]:
+        """The site's runner section; empty when it has none."""
+        return self.doc.get("runner") or {}
+
     def credential_names(self) -> list[str]:
         """Environment variables the site says hold credentials."""
         names = {name for source in self.doc.get("monitoring", []) for name in source.get("credentials_env", [])}
         assist = self.doc.get("incident", {}).get("assist") or {}
         if assist.get("api_key_env"):
             names.add(assist["api_key_env"])
+        names.update(self.runner.get(key) for key in ("user_env", "password_env") if self.runner.get(key))
         return sorted(names)
 
     def readable_dirs(self) -> list[Path]:
@@ -72,6 +79,23 @@ class Config:
         if evidence:
             dirs.append(Path(evidence).expanduser())
         return dirs
+
+
+def _runner_auth(doc: dict[str, Any], env: dict[str, str], take_tokens: bool) -> tuple[str, str] | None:
+    """The alert source's login, if the site has a runner; removed from this environment once read."""
+    runner = doc.get("runner") or {}
+    if not runner:
+        return None
+    try:
+        auth = harness.alerts.credentials(doc, env)
+    except harness.sre_common.SiteError as exc:
+        raise ConfigError(str(exc)) from exc
+    if take_tokens:
+        # The agent reads monitoring through its own read-only tools, never with the runner's login.
+        for name in (runner.get("user_env"), runner.get("password_env")):
+            if name:
+                os.environ.pop(name, None)
+    return auth
 
 
 def load(env: dict[str, str] | None = None, take_tokens: bool = True) -> Config:
@@ -113,6 +137,7 @@ def load(env: dict[str, str] | None = None, take_tokens: bool = True) -> Config:
         doc=doc,
         chat=chat,
         tokens=tokens,
+        runner_auth=_runner_auth(doc, env, take_tokens),
         mcp_config=Path(mcp).expanduser() if mcp else None,
         model=env.get(MODEL_ENV) or None,
     )

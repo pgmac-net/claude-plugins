@@ -14,13 +14,18 @@ from sre_gateway.agent import AskPermission, SdkDriver
 from sre_gateway.approvals import Decision
 from sre_gateway.config import Config, ConfigError, load
 from sre_gateway.gateway import Gateway, Settings
+from sre_gateway.runner import NagiosFeed, Runner, RunnerSettings, RunnerState
 from sre_gateway.tracker import GhTracker
 
 log = logging.getLogger("sre_gateway")
 
 
-def agent_options(config: Config, resume: str | None, can_use_tool: Any) -> Any:
-    """How every agent session runs: the site as working directory, the plugin loaded, only the chat policy."""
+def agent_options(config: Config, resume: str | None, can_use_tool: Any, triage: bool = False) -> Any:
+    """How every agent session runs: the site as working directory, the plugin loaded, only the chat policy.
+
+    A triage-only session gets the narrower triage rules and instructions; the
+    gateway starts it again with the chat ones once a responder speaks.
+    """
     from claude_agent_sdk import ClaudeAgentOptions  # noqa: PLC0415  pylint: disable=import-outside-toplevel
 
     options: dict[str, Any] = {
@@ -29,13 +34,13 @@ def agent_options(config: Config, resume: str | None, can_use_tool: Any) -> Any:
         "plugins": [{"type": "local", "path": str(harness.PLUGIN_ROOT)}],
         # No user, project or local settings: nothing on this machine can widen the policy.
         "setting_sources": [],
-        "settings": harness.chat_policy.settings_json(config.chat),
+        "settings": harness.chat_policy.settings_json(config.chat, triage=triage),
         "permission_mode": "default",
         "can_use_tool": can_use_tool,
         "system_prompt": {
             "type": "preset",
             "preset": "claude_code",
-            "append": prompts.system_append(str(harness.SCRIPTS)),
+            "append": prompts.system_append(str(harness.SCRIPTS), triage=triage),
         },
         "env": {"SRE_HARNESS_SITE": str(config.site_root)},
         "resume": resume,
@@ -64,13 +69,25 @@ def record(decision: Decision) -> None:
     )
 
 
+def build_runner(config: Config) -> Runner | None:
+    """The alert source, when the site configures one (enabled or not: a drill needs it either way)."""
+    if not config.runner:
+        return None
+    settings = RunnerSettings.from_site(config.doc)
+    feed = NagiosFeed(config.site_root, config.doc, config.runner_auth)
+    return Runner(settings, feed, RunnerState.load(config.state_dir / "runner.json"))
+
+
 def build(config: Config) -> Gateway:
     from sre_gateway.slack import SlackAdapter  # noqa: PLC0415  pylint: disable=import-outside-toplevel
 
-    secrets = harness.outbound_secrets(extra=config.tokens, names=config.credential_names())
+    extra = dict(config.tokens)
+    if config.runner_auth:
+        extra["runner_password"] = config.runner_auth[1]
+    secrets = harness.outbound_secrets(extra=extra, names=config.credential_names())
 
-    def driver_factory(ask: AskPermission) -> SdkDriver:
-        return SdkDriver(lambda resume, can_use: agent_options(config, resume, can_use), ask)
+    def driver_factory(ask: AskPermission, triage: bool) -> SdkDriver:
+        return SdkDriver(lambda resume, can_use: agent_options(config, resume, can_use, triage), ask)
 
     settings = Settings(
         hub=config.hub,
@@ -88,6 +105,8 @@ def build(config: Config) -> Gateway:
         driver_factory=driver_factory,
         record=record,
         scrub=lambda text: harness.scrub(text, secrets),
+        runner=build_runner(config),
+        record_policy=harness.audit.record_policy_change,
     )
 
 
@@ -114,9 +133,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
     if args.check:
+        runner = config.runner
+        state = "none" if not runner else f"{'enabled' if runner['enabled'] else 'disabled'}, source {runner['source']}"
         print(
             f"ok: site {config.doc['site']['name']}, {len(config.responders)} responder(s), "
-            f"{len(config.approvers)} approver(s), plugin {harness.PLUGIN_ROOT}"
+            f"{len(config.approvers)} approver(s), runner {state}, plugin {harness.PLUGIN_ROOT}"
         )
         return 0
     asyncio.run(serve(config))

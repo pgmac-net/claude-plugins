@@ -25,6 +25,23 @@ Design: [ADR 0008](../docs/adr/0008-chat-ops-with-identity-bound-approvals.md) a
 
 **Sessions.** One resumable session per incident. A session stops after `idle_stop_minutes` and resumes by its ID on the next message. At most `max_sessions` run at once; others wait, and say so. The conversation-to-session mapping survives restarts (`~/.local/state/sre-harness/gateway/conversations.json`, mode 0600). Usage limits, crashes and restarts are posted in the channel.
 
+## Unattended triage
+
+With a `runner` section in `site.yaml` and `enabled: true`, the gateway also starts incidents itself. Design: [ADR 0018](../docs/adr/0018-unattended-triage-runs-in-the-gateway-triage-only-until-a-responder-speaks.md) and [ADR 0019](../docs/adr/0019-unattended-triage-is-private-until-a-responder-promotes-it.md).
+
+1. **Poll.** Every `poll_seconds` it reads Nagios `statusjson.cgi` with a read-only login. A problem qualifies when it is HARD, not acknowledged, not in downtime, has notifications on, has lasted `min_state_age_seconds`, and is on a host that a catalog service in `tiers` claims directly. Acknowledge a problem to keep the runner out of it.
+2. **Start.** All new qualifying problems from one poll start one triage, announced in the hub. The agent runs under the **triage-only** policy: it may read, open a record with `incident.py open --auto` (in the private `tracker_repo`) and write its timeline. Every other call is refused at once, with no approval request, and the refusal goes in the audit log. It ends with a summary: evidence, likely cause, and a proposed fix with blast radius and rollback.
+3. **Join.** The first message from a responder in the channel ends triage-only for that session, for good. The gateway records the change in the audit log and restarts the agent under the normal chat policy. From then on approvals work as above.
+4. **Decide.** The responder says whether it is real. The agent then runs `incident.py promote`, which moves the incident to the public tracker with the triage's conclusions and moves the channel with it, or `incident.py dismiss`, which closes it as not-an-incident.
+
+**Limits.**
+- While a real incident's conversation is open, new problems are posted into it instead of starting another.
+- At most `max_auto_sessions` alert-started sessions run at once. Over that, the hub is told and nothing starts.
+- After a triage, a service waits `cooldown_minutes` before it can start another.
+- If the source can't be read, the hub is told once, and again when it recovers.
+
+**Drill it** with `/incident drill alert <host>/<check> [what to pretend]`. This starts the same triage-only path with a made-up alert, whether or not the runner is enabled. Check what would start right now with `uv run <plugin>/scripts/alerts.py check --verbose`.
+
 ## What the agent may do
 
 The agent runs with only the plugin's chat policy (`scripts/chat_policy.py`). User, project and local Claude Code settings are not loaded.
@@ -51,6 +68,8 @@ Needs `uv`, the `gh` CLI signed in, `kubectl` if the agent should read a cluster
    SRE_HARNESS_SITE=/path/to/site-repo
    # optional: SRE_GATEWAY_MCP_CONFIG=/path/to/mcp.json   (monitoring MCP servers for the agent)
    # optional: SRE_GATEWAY_MODEL=<model>
+   # with a runner: the variables named by runner.user_env and runner.password_env
+   # (a read-only Nagios login; removed from the environment before any agent starts)
    ```
 
 5. **Install and check.**
@@ -89,6 +108,10 @@ Upgrade by moving the plugin checkout to a new tag or commit, running `uv sync -
 | The agent reads or leaks a credential | Deny-list; the gateway's Slack tokens are removed from its environment before the agent starts; every post is redacted | The Claude token must stay in the agent's environment. Claude Code's own read-only commands can reach files the deny-list names, on a best-effort basis |
 | An inbound attack surface | Socket Mode: outbound websocket only | — |
 | Shared usage limits | Limit hits are posted; sessions are capped | Incidents compete with interactive use of the same subscription |
+| An unattended triage changes something | Triage-only rules deny record changes and pre-approved actions; every other call is refused without asking and logged | Claude Code's own read-only commands still run, as in every session |
+| Alert text instructs the agent | The agent is told alert output is evidence; the triage-only policy bounds what any instruction could do | A misled triage can propose a bad fix; a person approves every change |
+| An alert storm floods chat or spends the usage window | One triage per poll; alerts join an open incident; `max_auto_sessions`; per-service cooldown | Each poll that finds new problems with no incident open can still start one triage |
+| Unreviewed text on a public tracker | Triage records open in a private repository; only a responder's `promote` makes one public, carrying conclusions, not evidence | — |
 
 ## Development
 

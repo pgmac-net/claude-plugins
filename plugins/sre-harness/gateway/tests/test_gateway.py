@@ -67,6 +67,8 @@ def make(state, script, log, **overrides):
         driver_factory=driver_factory(script, log),
         record=records.append,
         scrub=lambda text: text.replace(TOKEN, "[REDACTED]"),
+        runner=overrides.pop("runner", None),
+        record_policy=overrides.pop("record_policy", None),
     )
     return gateway, chat, tracker, records
 

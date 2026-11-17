@@ -38,6 +38,8 @@ HARNESS_CALLS = (
     "incident.py status",
     "incident.py set",
     "incident.py close",
+    "incident.py promote",
+    "incident.py dismiss",
     "timeline.py",
     "audit.py show",
     "audit.py verify",
@@ -300,6 +302,37 @@ def rules(chat: dict[str, Any], scripts_dir: Path = SCRIPTS) -> dict[str, list[s
     return {"allow": allow, "deny": default_deny()}
 
 
-def settings_json(chat: dict[str, Any], scripts_dir: Path = SCRIPTS) -> str:
+def triage_rules(chat: dict[str, Any], scripts_dir: Path = SCRIPTS) -> dict[str, list[str]]:
+    """The rules for an unattended triage: read, open a private record, write its timeline. Nothing else.
+
+    The harness calls that change what the incident is, or the system, are
+    withheld and denied outright: closing, promoting, dismissing, attaching
+    (which would write to a record a person owns) and running a pre-approved
+    action. 'open' is allowed only as 'open --auto', so the record goes to the
+    private runner tracker; any other open reaches the gateway, which refuses
+    every call a triage-only session asks about.
+    """
+    normal = rules(chat, scripts_dir)
+    withheld = {f"Bash(uv run {scripts_dir / call.split()[0]} {call.split()[1]} *)" for call in TRIAGE_WITHHELD}
+    auto_open = f"Bash(uv run {scripts_dir / 'incident.py'} open --auto *)"
+    allow = [rule for rule in normal["allow"] if rule not in withheld] + [auto_open]
+    open_rule = f"Bash(uv run {scripts_dir / 'incident.py'} open *)"
+    deny = normal["deny"] + sorted(rule for rule in withheld if rule != open_rule)
+    return {"allow": allow, "deny": deny}
+
+
+# Harness calls a triage-only session may not make; see triage_rules.
+TRIAGE_WITHHELD = (
+    "incident.py open",
+    "incident.py attach",
+    "incident.py close",
+    "incident.py promote",
+    "incident.py dismiss",
+    "autonomy.py run",
+)
+
+
+def settings_json(chat: dict[str, Any], scripts_dir: Path = SCRIPTS, triage: bool = False) -> str:
     """Inline settings for the agent: the permission rules and nothing else."""
-    return json.dumps({"permissions": rules(chat, scripts_dir)}, sort_keys=True)
+    chosen = triage_rules(chat, scripts_dir) if triage else rules(chat, scripts_dir)
+    return json.dumps({"permissions": chosen}, sort_keys=True)

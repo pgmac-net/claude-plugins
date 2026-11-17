@@ -188,6 +188,8 @@ uv run scripts/trends.py [--as-of YYYY-MM-DD] [--pirs <dir>] [--json]
 
 **From chat.** With a `chat` section in `site.yaml` and the gateway running, a responder starts an incident with `/incident <text>` in Slack. The agent works it in a private channel. Every command that isn't pre-approved waits for a listed approver's click, which is recorded in the audit log. Setup and the threat model: [gateway/README.md](gateway/README.md).
 
+**From an alert.** With a `runner` section as well, the gateway polls the alert source and starts an **unattended triage** for new problems on services in the chosen tiers. A triage opens a private record, gathers evidence and proposes a fix, and changes nothing. When the first responder speaks, it becomes a normal chat incident, and the responder decides whether to promote it to the tracker or dismiss it. Rules: [gateway/README.md](gateway/README.md#unattended-triage), ADR 0018 and ADR 0019.
+
 ## Contents
 
 | Path | Purpose |
@@ -199,11 +201,12 @@ uv run scripts/trends.py [--as-of YYYY-MM-DD] [--pirs <dir>] [--json]
 | `skills/start-incident/` | Works a live incident: record, triage, gated recovery, typed timeline |
 | `skills/create-pir/` | Writes the post-incident review from the timeline, with an optional CAST section |
 | `skills/design-review/` | Targeted STPA analysis of one service, gated step by step; files findings |
-| `schemas/` | JSON Schema for `site.yaml` (version 6), journey front matter, STPA analyses, the supported OpenSLO subset, tier definitions, catalog entities and the pre-approved action list |
+| `schemas/` | JSON Schema for `site.yaml` (version 7), journey front matter, STPA analyses, the supported OpenSLO subset, tier definitions, catalog entities and the pre-approved action list |
 | `scripts/validate_site.py` | Site validation: schema, paths, references, audit privacy, secret shapes, catalog |
 | `scripts/catalog_sync.py` | Source adapters and the generated layer |
 | `scripts/catalog_check.py` | Entity validation and drift report |
-| `scripts/incident.py` | Opens, updates and resolves the tracking issue |
+| `scripts/incident.py` | Opens, updates and resolves the tracking issue; promotes or dismisses an unattended triage |
+| `scripts/alerts.py` | Which alert-source problems start an unattended triage; `check` shows what would start now |
 | `scripts/timeline.py` | Writes, reads and exports timeline entries; says when a status update is due |
 | `hooks/hooks.json`, `scripts/audit_hook.py` | The audit hook: captures tool calls during an incident |
 | `scripts/audit.py` | Explicit audit records, verification, commit to the audit location |
@@ -218,7 +221,7 @@ uv run scripts/trends.py [--as-of YYYY-MM-DD] [--pirs <dir>] [--json]
 | `scripts/kube_read.py` | Read-only kubectl for an agent driven from chat: allowed verbs and options only, checked per argument, no shell |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
-| `gateway/` | The chat-ops gateway: Slack Socket Mode, approval requests, sessions per incident ([gateway/README.md](gateway/README.md)) |
+| `gateway/` | The chat-ops gateway: Slack Socket Mode, approval requests, sessions per incident, unattended triage ([gateway/README.md](gateway/README.md)) |
 | `templates/site-repo/` | Starter layout for a new site repository |
 | `docs/adr/` | Design decisions |
 | `CONTEXT.md` | Glossary |
@@ -226,6 +229,8 @@ uv run scripts/trends.py [--as-of YYYY-MM-DD] [--pirs <dir>] [--json]
 Scripts need [`uv`](https://docs.astral.sh/uv/); dependencies are declared inline. Catalog sync also needs `git`, and `helm` for chart areas. The incident scripts need the `gh` CLI, signed in.
 
 ## Upgrading a site
+
+**From schema version 6 to 7.** Set `schema_version: 7`. The new `runner` section is optional; `runner: {}` means no unattended triage. To add one, it needs a `chat` section, a monitoring source of type `nagios`, and a private `tracker_repo`. Start with `enabled: false` and run `/incident drill alert <host>/<check>` first.
 
 **From schema version 5 to 6.** Set `schema_version: 6`. The new `reliability` section is optional; leave it out or set `reliability: {}` for the defaults. Add `services:` (catalog names) to the front matter of PIRs so the backlog can attribute them.
 
