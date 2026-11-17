@@ -272,6 +272,40 @@ def check_chat(doc: dict[str, Any]) -> tuple[list[str], list[str], dict[str, Any
     )
 
 
+def check_runner(doc: dict[str, Any]) -> tuple[list[str], dict[str, Any] | None]:
+    """Unattended triage needs the gateway, a nagios source, and a private place for records nobody has read."""
+    runner = doc.get("runner") or {}
+    if not runner:
+        return [], None
+    errors = []
+    if not doc.get("chat"):
+        errors.append("runner: needs a chat section; the chat gateway runs the triage")
+    sources = {entry["name"]: entry for entry in doc.get("monitoring", [])}
+    source = sources.get(runner["source"])
+    if source is None:
+        errors.append(f"runner/source: '{runner['source']}' is not a monitoring source name")
+    elif source["type"] != "nagios":
+        errors.append(f"runner/source: '{runner['source']}' is {source['type']}; only nagios is supported")
+    elif not runner.get("status_url") and not source.get("endpoint"):
+        errors.append("runner/status_url: needed, as the monitoring source has no endpoint")
+    repos = doc.get("repos", {})
+    alias = runner["tracker_repo"]
+    if alias not in repos:
+        errors.append(f"runner/tracker_repo: '{alias}' is not a key of repos")
+    elif repos[alias].get("visibility") != "private":
+        errors.append(
+            f"runner/tracker_repo: '{alias}' is not private; unattended triage writes what no person has read yet"
+        )
+    if bool(runner.get("user_env")) != bool(runner.get("password_env")):
+        errors.append("runner: user_env and password_env go together")
+    return errors, {
+        "enabled": runner["enabled"],
+        "source": runner["source"],
+        "tiers": runner.get("tiers", [1]),
+        "tracker_repo": alias,
+    }
+
+
 def check_slo(
     site_root: Path, doc: dict[str, Any], tiers_doc: dict[str, Any] | None
 ) -> tuple[list[str], list[str], dict[str, Any] | None]:
@@ -339,6 +373,7 @@ def validate(site_root: Path) -> Report:
     chat_errors, chat_warnings, chat_summary = check_chat(doc)
     report.errors.extend(f"{SITE_FILE}: {msg}" for msg in chat_errors)
     report.warnings.extend(f"{SITE_FILE}: {msg}" for msg in chat_warnings)
+    report.errors.extend(f"{SITE_FILE}: {msg}" for msg in check_runner(doc)[0])
 
     catalog_summary: dict[str, Any] = {}
     if not path_errors and not tier_errors:
@@ -359,6 +394,7 @@ def validate(site_root: Path) -> Report:
         "incident": incident_summary,
         "chat_configured": bool(doc.get("chat")),
         "chat": chat_summary,
+        "runner": check_runner(doc)[1],
         "slo_configured": bool(doc.get("slo")),
         "slo": slo_summary,
         "stpa_analyses": [] if path_errors else check_stpa(site_root, doc, report),

@@ -32,6 +32,12 @@ Record a refusal the same way with `--kind denial`. An approval record is your s
 
 **Driven from chat, you record no approvals.** When the session runs through the chat gateway, a command that needs approval stops at a permission prompt; the gateway shows it to an approver, records their decision, bound to that one call, and then answers. State the blast radius in your message before you run the command, so the request can link to it. A refused or expired request comes back as a denial: do not retry the same command without asking again in the channel.
 
+**In an unattended triage** (`unattended-triage.md`), the gateway also writes:
+- a `denial` with `outcome: refused` and no approver for every call the triage-only policy refused;
+- one `policy_change` (`triage-only` to `chat`, who, and a link to their message) when a responder first speaks.
+
+A promoted incident's log starts with a `promoted_from` record, naming the triage's log and its head hash. `audit.py commit` commits both logs together.
+
 **If your agent has no hooks**, nothing is captured automatically. Record each command yourself, immediately after running it, with `--kind command --command "<exact command>" --text "<outcome>"`. These are marked `self-reported`: a weaker record, and the review will say so.
 
 ## Inspecting

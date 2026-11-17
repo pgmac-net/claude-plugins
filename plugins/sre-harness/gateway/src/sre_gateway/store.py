@@ -20,6 +20,12 @@ class Conversation:
     title: str = ""
     started_by: str = ""
     archived: bool = False
+    # Started by the alert source rather than a person.
+    auto: bool = False
+    # 'triage-only' until a responder first speaks, then 'chat'; never back.
+    policy: str = "chat"
+    # A triage-only session's token: the harness scripts let it write only to the record it opened.
+    triage_token: str = ""
 
 
 class Store:
@@ -34,16 +40,20 @@ class Store:
         return [Conversation(**{k: v for k, v in item.items() if k in known}) for item in raw.get("conversations", [])]
 
     def save(self, conversations: list[Conversation]) -> None:
-        """Write atomically, readable by this user only."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.parent.chmod(0o700)
         data = json.dumps({"v": 1, "conversations": [asdict(c) for c in conversations]}, indent=2) + "\n"
-        handle, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".conversations-")
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as out:
-                out.write(data)
-            os.chmod(temp, 0o600)
-            os.replace(temp, self.path)
-        except BaseException:
-            Path(temp).unlink(missing_ok=True)
-            raise
+        write_private(self.path, data)
+
+
+def write_private(path: Path, data: str) -> None:
+    """Write a file atomically, in a directory and with a mode only this user can read."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
+    handle, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}-")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            out.write(data)
+        os.chmod(temp, 0o600)
+        os.replace(temp, path)
+    except BaseException:
+        Path(temp).unlink(missing_ok=True)
+        raise

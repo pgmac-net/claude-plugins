@@ -264,6 +264,44 @@ def write_incident_state(state: dict[str, Any], make_current: bool = True) -> No
         (state_dir() / "current").write_text(state["id"] + "\n", encoding="utf-8")
 
 
+TRIAGE_ENV = "SRE_HARNESS_TRIAGE"
+
+
+TRIAGE_TOKEN = re.compile(r"^[0-9a-f]{32}$")
+
+
+def triage_token() -> str | None:
+    """The token of the unattended triage this process runs in, or None outside one.
+
+    The chat gateway sets SRE_HARNESS_TRIAGE to a random token per triage
+    conversation. A value of the wrong shape still means 'in a triage': it
+    matches no record, so every write is refused.
+    """
+    value = os.environ.get(TRIAGE_ENV)
+    if value is None:
+        return None
+    return value if TRIAGE_TOKEN.match(value) else "invalid"
+
+
+def check_triage_write(state: dict[str, Any]) -> None:
+    """Inside an unattended triage, refuse a write to any record but the open one that triage created.
+
+    The triage's permission rules allow the timeline and 'incident.py set',
+    which take --incident. Without this check the session could write
+    unreviewed text into an incident a person owns, or into another triage,
+    by naming it. 'open --auto' stamps the record with the session's token;
+    only that record, while still open, can be written.
+    """
+    token = triage_token()
+    if token is None:
+        return
+    finished = state.get("status") == "resolved" or state.get("promoted_to") or state.get("dismissed")
+    if state.get("triage_token") != token or finished:
+        raise SiteError(
+            f"this session is an unattended triage; it may write only to the open record it created, not {state['id']}"
+        )
+
+
 def guarded(action: Callable[[], int]) -> int:
     """Run a command body; a SiteError becomes a message on stderr and exit code 2."""
     try:

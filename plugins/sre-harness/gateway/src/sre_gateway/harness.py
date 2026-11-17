@@ -22,20 +22,21 @@ if not (SCRIPTS / "sre_common.py").is_file():
 sys.path.insert(0, str(SCRIPTS))
 
 # pylint: disable=wrong-import-position,import-error
+import alerts  # noqa: E402
 import audit  # noqa: E402
 import chat_policy  # noqa: E402
 import redact  # noqa: E402
 import sre_common  # noqa: E402
 import validate_site  # noqa: E402
 
-__all__ = ["PLUGIN_ROOT", "SCRIPTS", "audit", "chat_policy", "redact", "sre_common", "validate_site"]
+__all__ = ["PLUGIN_ROOT", "SCRIPTS", "alerts", "audit", "chat_policy", "redact", "sre_common", "validate_site"]
 
-INCIDENT_CALL = re.compile(r"(?:^|\s)\S*/scripts/incident\.py\s+(open|attach|close)\b")
+INCIDENT_CALL = re.compile(r"(?:^|\s)\S*/scripts/incident\.py\s+(open|attach|close|promote|dismiss)\b")
 RESULT_LINE = re.compile(r'^\{"id":.*\}$', re.MULTILINE)
 
 
 def incident_call(command: str) -> str | None:
-    """Which incident.py subcommand a shell command runs, if it is one of open, attach or close."""
+    """Which incident.py subcommand a shell command runs: open, attach, close, promote or dismiss."""
     match = INCIDENT_CALL.search(command)
     return match.group(1) if match else None
 

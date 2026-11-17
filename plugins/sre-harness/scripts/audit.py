@@ -323,7 +323,9 @@ def cmd_record(args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, 
     return 0
 
 
-CHAT_OUTCOMES = ("approved", "denied", "expired")
+CHAT_OUTCOMES = ("approved", "denied", "expired", "refused")
+# Outcomes no person gave: a request that timed out, or a call the session's policy refused without asking.
+UNATTENDED_OUTCOMES = ("expired", "refused")
 
 
 @dataclass(frozen=True)
@@ -349,8 +351,10 @@ def record_chat_decision(incident_id: str, decision: ChatDecision) -> dict[str, 
     """
     if decision.outcome not in CHAT_OUTCOMES:
         raise ValueError(f"outcome must be one of {CHAT_OUTCOMES}")
-    if decision.outcome != "expired" and not decision.approver:
+    if decision.outcome not in UNATTENDED_OUTCOMES and not decision.approver:
         raise ValueError("an approval or denial needs the approver's identity")
+    if decision.outcome == "refused" and decision.approver:
+        raise ValueError("a refusal by policy names no approver")
     if audit_hook.is_closed(incident_id):
         raise SiteError(f"the audit log for {incident_id} is committed and closed")
     env_values = redact.env_secrets(extra_names=audit_hook.credential_names(incident_id))
@@ -377,6 +381,48 @@ def record_chat_decision(incident_id: str, decision: ChatDecision) -> dict[str, 
         record["reason"] = redact.redact_text(decision.reason, env_values, limit=500)
     audit_hook.append(incident_id, record)
     return record
+
+
+POLICIES = ("triage-only", "chat")
+
+
+@dataclass(frozen=True)
+class PolicyChange:
+    """A chat gateway moving one agent session from one tool policy to another, because of whose message."""
+
+    incident: str
+    session: str | None
+    old: str
+    new: str
+    by: str
+    link: str | None
+
+
+def record_policy_change(change: PolicyChange) -> None:
+    """Record that the gateway moved a session out of triage-only, and whose message did it.
+
+    Written by the chat gateway. Only triage-only to chat happens: a session never goes back.
+    """
+    if (change.old, change.new) != POLICIES:
+        raise ValueError(f"the only policy change is {POLICIES[0]} to {POLICIES[1]}; a session never goes back")
+    if audit_hook.is_closed(change.incident):
+        raise SiteError(f"the audit log for {change.incident} is committed and closed")
+    audit_hook.append(
+        change.incident,
+        {
+            "v": 1,
+            "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "incident": change.incident,
+            "session": change.session,
+            "capture": "gateway",
+            "via": "chat",
+            "event": "policy_change",
+            "from": change.old,
+            "to": change.new,
+            "by": change.by,
+            "link": change.link,
+        },
+    )
 
 
 def cmd_show(_args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, Any], _root: Path) -> int:
@@ -425,25 +471,40 @@ def release_capture(incident_id: str) -> None:
     audit_hook.release_active_marker()
 
 
-def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, Any], site_root: Path) -> int:
+def _commit_ready(state: dict[str, Any], doc: dict[str, Any], offline: bool) -> dict[str, Any]:
+    """Verify one incident's log for commit; raise if it must not be committed."""
     incident_id = state["id"]
     entries = read_log(incident_id)
     result = verify(entries)
     if not result["chain_intact"]:
-        raise SiteError(f"the hash chain is broken at line(s) {result['broken_at_lines']}; not committing")
+        raise SiteError(
+            f"{incident_id}: the hash chain is broken at line(s) {result['broken_at_lines']}; not committing"
+        )
     if result["leftover_secrets"]:
         lines = ", ".join(str(item["line"]) for item in result["leftover_secrets"])
         raise SiteError(
-            f"line(s) {lines} of the log still look like they hold a secret; not publishing it. "
+            f"{incident_id}: line(s) {lines} of the log still look like they hold a secret; not publishing it. "
             "Run audit.py verify, show the person, and rotate anything real"
         )
-    if not args.offline:
+    if not offline:
         pinned = check_anchors(state, entries, doc["incident"].get("responders"))
         if pinned["anchor_mismatches"]:
             raise SiteError(
-                f"the log does not match {len(pinned['anchor_mismatches'])} head hash(es) pinned in the timeline; "
-                "not committing. Run audit.py verify --check-anchors"
+                f"{incident_id}: the log does not match {len(pinned['anchor_mismatches'])} head hash(es) pinned in "
+                "the timeline; not committing. Run audit.py verify --check-anchors"
             )
+    return result
+
+
+def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, Any], site_root: Path) -> int:
+    incident_id = state["id"]
+    # A promoted incident began as an unattended triage: its log is the first part of this one's, and goes with it.
+    earlier = sre_common.read_incident_state(state["promoted_from"]) if state.get("promoted_from") else None
+    if earlier is not None and not audit_hook.spool_path(earlier["id"]).is_file():
+        earlier = None
+    if earlier is not None:
+        _commit_ready(earlier, doc, args.offline)
+    result = _commit_ready(state, doc, args.offline)
 
     checkout = audit_checkout(doc, site_root)
     remote_head = (
@@ -460,6 +521,11 @@ def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, A
             shutil.copyfile(audit_hook.spool_path(incident_id), tree / target)
             _git(tree, "add", str(target))
             message = f"audit: {incident_id} ({result['records']} records)\n\nhead: {result['head']}"
+            if earlier is not None:
+                before = target.parent / f"{earlier['id']}.jsonl"
+                shutil.copyfile(audit_hook.spool_path(earlier["id"]), tree / before)
+                _git(tree, "add", str(before))
+                message += f"\npromoted from: {earlier['id']} (committed beside it)"
             _git(tree, "commit", "--quiet", "-m", message)
             _git(tree, "push", "--quiet", "-u", "origin", branch)
         finally:
@@ -477,6 +543,8 @@ def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, A
                 f"{len(result['unauthorised_mutations'])} mutation(s) with no approval or Tier 2 claim.",
             ]
         ).strip()  # fmt: skip
+    if earlier is not None:
+        release_capture(earlier["id"])
     release_capture(incident_id)
     print(json.dumps({"incident": incident_id, "branch": branch, "file": str(target), "pull_request": url}))
     return 0

@@ -113,6 +113,16 @@ def test_agent_options_load_only_the_chat_policy(site):
     assert BOT not in json.dumps(options.env)
 
 
+def test_triage_options_narrow_the_rules_and_flag_the_scripts(site):
+    config = config_module.load(env_for(site), take_tokens=False)
+    options = agent_options(config, None, None, triage="ab" * 16)
+    assert options.env[harness.sre_common.TRIAGE_ENV] == "ab" * 16
+    permissions = json.loads(options.settings)["permissions"]
+    assert any(rule.endswith("incident.py open --auto *)") for rule in permissions["allow"])
+    assert any(rule.endswith("incident.py close *)") for rule in permissions["deny"])
+    assert "UNATTENDED TRIAGE" in options.system_prompt["append"]
+
+
 # --- the harness link -------------------------------------------------------------
 
 

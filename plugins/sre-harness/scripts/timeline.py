@@ -126,6 +126,7 @@ def post(state: dict[str, Any], entry_type: str, text: str, timezone: str, at: s
     """Post one entry and return the comment URL."""
     if not text.strip():
         raise SiteError("an entry needs text")
+    sre_common.check_triage_write(state)
     moment = parse_utc(at) if at else utc_now()
     body = render(entry_type, text, moment, timezone, audit_hook.head(state["id"]))
     return sre_common.run_gh(

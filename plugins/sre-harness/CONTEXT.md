@@ -230,6 +230,36 @@ _Avoid_: Approval card, confirmation prompt
 A post-incident review: the written analysis of an incident's causes and the actions that follow.
 _Avoid_: Post-mortem, RCA document
 
+### Unattended triage
+
+**Alert source**:
+The monitoring system the chat gateway polls for problems, named by `runner.source`.
+_Avoid_: Feed, webhook, alert stream
+
+**Qualifying problem**:
+An unhandled HARD problem, old enough, on a host that a service in one of the runner's tiers claims directly.
+_Avoid_: Alert (any problem), page
+
+**Unattended triage**:
+An incident started by the alert source with no person watching: it opens a private record, gathers evidence and proposes a fix, and changes nothing.
+_Avoid_: Auto-remediation, bot incident, autopilot
+
+**Triage-only policy**:
+The tool policy of an unattended triage: read-only, plus opening its own private record and writing its timeline. Every other call is refused without asking anyone.
+_Avoid_: Read-only mode, safe mode
+
+**Policy change**:
+The one-way move of a session from the triage-only policy to the chat policy, made when a responder first speaks, and recorded in the audit log.
+_Avoid_: Handover (that is a timeline entry), escalation
+
+**Promotion**:
+A responder's decision that an unattended triage is a real incident: its conclusions move to the site's tracker and its audit log chains to the new one.
+_Avoid_: Escalation, publishing
+
+**Dismissal**:
+A responder's decision that an unattended triage was not an incident; its private record is closed as `not-an-incident`.
+_Avoid_: False positive (a property of the check, not the decision)
+
 ### Reliability design
 
 **Design review**:

@@ -133,7 +133,11 @@ class FakeDriver:
 
 
 def driver_factory(script: list[list[Event | tuple]], log: dict[str, Any]):
-    return lambda ask: FakeDriver(ask, script, log)
+    def make(ask: AskPermission, triage: bool = False) -> FakeDriver:
+        log.setdefault("policies", []).append("triage-only" if triage else "chat")
+        return FakeDriver(ask, script, log)
+
+    return make
 
 
 async def settle(times: int = 20) -> None:

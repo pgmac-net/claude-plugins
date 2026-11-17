@@ -18,7 +18,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 6
+      "const": 7
     },
     "site": {
       "type": "object",
@@ -190,6 +190,85 @@
             }
           },
           "description": "Names of the environment variables holding the chat platform's tokens."
+        }
+      }
+    },
+    "runner": {
+      "type": "object",
+      "description": "Unattended triage. The chat gateway polls one alert source and, for new unhandled problems on services in the listed tiers, starts an agent session that may only read, open a private incident record and propose a fix. Needs a chat section. Empty means no runner.",
+      "additionalProperties": false,
+      "if": {
+        "minProperties": 1
+      },
+      "then": {
+        "required": [
+          "enabled",
+          "source",
+          "tracker_repo"
+        ]
+      },
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the gateway polls at all. Off by default."
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "description": "Name of the monitoring entry to poll. Only type nagios is supported."
+        },
+        "status_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "description": "statusjson.cgi URL, when it is not <source endpoint>/cgi-bin/statusjson.cgi."
+        },
+        "user_env": {
+          "$ref": "#/$defs/envVarName",
+          "description": "Environment variable holding the alert source's user name."
+        },
+        "password_env": {
+          "$ref": "#/$defs/envVarName",
+          "description": "Environment variable holding the alert source's password."
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Service tiers whose problems start a triage. Default [1]."
+        },
+        "tracker_repo": {
+          "type": "string",
+          "description": "Repository alias where unattended triage opens its record. Must be private: nobody has read it yet. A responder promotes it to the tracker."
+        },
+        "poll_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 3600,
+          "description": "Seconds between polls. Default 60."
+        },
+        "max_auto_sessions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Alert-started sessions running at once, counted within chat.max_sessions. Default 1."
+        },
+        "cooldown_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440,
+          "description": "After a triage on a service, new problems on it wait this long. Default 30."
+        },
+        "min_state_age_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600,
+          "description": "A problem must have lasted this long, so a flap that clears is ignored. Default 120."
         }
       }
     },
