@@ -112,6 +112,9 @@ class FakeDriver:
 
     async def start(self, resume: str | None) -> None:
         self.log.setdefault("starts", []).append(resume)
+        if self.log.get("fail_starts", 0) > 0:
+            self.log["fail_starts"] -= 1
+            raise RuntimeError("Control request timeout: initialize")
         self.session_id = resume or "session-1"
 
     async def turn(self, message: str):

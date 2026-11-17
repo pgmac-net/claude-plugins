@@ -383,6 +383,34 @@ async def test_a_failed_start_releases_its_session_slot(state):
     await gateway.shutdown()
 
 
+async def test_a_start_that_fails_once_is_retried_with_its_message(state, monkeypatch):
+    monkeypatch.setattr("sre_gateway.gateway.START_RETRY_SECONDS", 0)
+    log = {"fail_starts": 1}
+    gateway, chat, _t, _r = make(state, [[Text("on it")]], log)
+    await start_incident(gateway)
+    await settle(40)
+    assert len(log["starts"]) == 2
+    assert log["messages"][0].startswith("[chat] name-") and "Web down" in log["messages"][0]
+    assert any("Trying again" in text for text in chat.texts())
+    await gateway.shutdown()
+
+
+async def test_a_message_is_held_when_the_agent_never_starts(state, monkeypatch):
+    monkeypatch.setattr("sre_gateway.gateway.START_RETRY_SECONDS", 0)
+    log = {"fail_starts": 3}
+    gateway, chat, _t, _r = make(state, [[Text("on it")]], log)
+    await start_incident(gateway)
+    await settle(40)
+    assert "messages" not in log
+    assert any("did not start after 3 tries" in text for text in chat.texts())
+    session = next(iter(gateway.sessions.values()))
+    await gateway.on_message(Incoming(session.conv.channel, OWNER, "try again", "9.9", thread=session.conv.thread))
+    await settle(40)
+    first = log["messages"][0]
+    assert "Web down" in first and first.endswith("[chat] name-" + OWNER + ": try again")
+    await gateway.shutdown()
+
+
 def test_prompt_asks_for_plain_harness_calls_and_leaves_closing_to_people():
     from sre_gateway import prompts  # noqa: PLC0415  pylint: disable=import-outside-toplevel
 
