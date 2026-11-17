@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,8 +52,8 @@ TRIAGE_REFUSAL = (
 
 PolicyChange = harness.audit.PolicyChange
 PolicyRecorder = Callable[[PolicyChange], None]
-# (permission callback, triage-only) -> a driver
-DriverFactory = Callable[[AskPermission, bool], AgentDriver]
+# (permission callback, triage token or None for the chat policy) -> a driver
+DriverFactory = Callable[[AskPermission, str | None], AgentDriver]
 
 
 @dataclass(frozen=True)
@@ -304,6 +305,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             started_by=RUNNER_NAME,
             auto=True,
             policy=TRIAGE,
+            triage_token=secrets.token_hex(16),
         )
         session = self._add(conv)
         self._save()
@@ -423,7 +425,8 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             )
         await self._slots.acquire()
         driver = self._driver_factory(
-            lambda tool, data, call_id: self._ask(session, tool, data, call_id), session.conv.policy == TRIAGE
+            lambda tool, data, call_id: self._ask(session, tool, data, call_id),
+            session.conv.triage_token if session.conv.policy == TRIAGE else None,
         )
         try:
             await driver.start(session.conv.session_id)

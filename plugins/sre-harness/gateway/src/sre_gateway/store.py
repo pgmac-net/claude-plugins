@@ -24,6 +24,8 @@ class Conversation:
     auto: bool = False
     # 'triage-only' until a responder first speaks, then 'chat'; never back.
     policy: str = "chat"
+    # A triage-only session's token: the harness scripts let it write only to the record it opened.
+    triage_token: str = ""
 
 
 class Store:

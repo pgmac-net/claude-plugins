@@ -277,18 +277,27 @@ class TestPrivateRecord:
 
 
 class TestTriagePolicy:
-    def test_a_triage_session_cannot_write_to_a_person_incident(self, gh, capsys, monkeypatch):
+    def test_a_triage_session_writes_only_to_the_open_record_it_created(self, gh, capsys, monkeypatch):
         assert incident.main(["open", "--title", "People are on it", "--severity", "P2"]) == 0
         person = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["id"]
+        monkeypatch.setenv(sre_common.TRIAGE_ENV, "cd" * 16)
+        other = open_auto(capsys, "--new")["id"]
+        monkeypatch.setenv(sre_common.TRIAGE_ENV, "ab" * 16)
         own = open_auto(capsys, "--new")["id"]
-        monkeypatch.setenv(sre_common.TRIAGE_ENV, "1")
+        assert sre_common.read_incident_state(own)["triage_token"] == "ab" * 16
         comments = len(gh.comments)
-        assert timeline.main(["--incident", person, "add", "--type", "discovery", "--text", "x"]) == 2
-        assert "unattended triage" in capsys.readouterr().err
-        assert incident.main(["set", "--incident", person, "--phase", "Diagnosing"]) == 2
+        for target in (person, other):
+            assert timeline.main(["--incident", target, "add", "--type", "discovery", "--text", "x"]) == 2
+            assert "unattended triage" in capsys.readouterr().err
+            assert incident.main(["set", "--incident", target, "--phase", "Diagnosing"]) == 2
         assert len(gh.comments) == comments
         assert timeline.main(["--incident", own, "add", "--type", "discovery", "--text", "ok"]) == 0
         assert incident.main(["set", "--incident", own, "--phase", "Diagnosing"]) == 0
+        state = sre_common.read_incident_state(own)
+        sre_common.write_incident_state({**state, "dismissed": True}, make_current=False)
+        assert timeline.main(["--incident", own, "add", "--type", "discovery", "--text", "late"]) == 2
+        monkeypatch.setenv(sre_common.TRIAGE_ENV, "not-a-token")
+        assert incident.main(["set", "--incident", other, "--phase", "Diagnosing"]) == 2
 
     def test_triage_withholds_record_changes_and_allows_only_auto_open(self, tmp_path):
         rules = chat_policy.triage_rules({}, tmp_path)

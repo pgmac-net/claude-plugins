@@ -85,6 +85,7 @@ async def test_a_new_alert_starts_a_triage_only_session(state):
     assert "web01/HTTP is CRITICAL [component:shop]" in chat.texts()[0]
     session = only(gateway.sessions.values())
     assert session.conv.auto and session.conv.policy == "triage-only"
+    assert len(session.conv.triage_token) == 32
     assert log["policies"] == ["triage-only"]
     assert log["messages"][0].startswith("[alert]") and "web01/HTTP" in log["messages"][0]
 

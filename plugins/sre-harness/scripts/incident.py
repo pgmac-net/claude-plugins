@@ -289,6 +289,8 @@ def cmd_open(args: argparse.Namespace, doc: dict[str, Any]) -> int:
         "title": title,
         "drill": args.drill,
         "auto": args.auto,
+        # Ties the record to the triage session that opened it: only that session may write to it.
+        **({"triage_token": sre_common.triage_token()} if args.auto and sre_common.triage_token() else {}),
         "severity": args.severity,
         "phase": PHASES[0],
         "opened_at": iso_utc(now),

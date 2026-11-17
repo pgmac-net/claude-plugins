@@ -20,7 +20,7 @@ from sre_gateway.tracker import GhTracker
 log = logging.getLogger("sre_gateway")
 
 
-def agent_options(config: Config, resume: str | None, can_use_tool: Any, triage: bool = False) -> Any:
+def agent_options(config: Config, resume: str | None, can_use_tool: Any, triage: str | None = None) -> Any:
     """How every agent session runs: the site as working directory, the plugin loaded, only the chat policy.
 
     A triage-only session gets the narrower triage rules and instructions; the
@@ -34,16 +34,19 @@ def agent_options(config: Config, resume: str | None, can_use_tool: Any, triage:
         "plugins": [{"type": "local", "path": str(harness.PLUGIN_ROOT)}],
         # No user, project or local settings: nothing on this machine can widen the policy.
         "setting_sources": [],
-        "settings": harness.chat_policy.settings_json(config.chat, triage=triage),
+        "settings": harness.chat_policy.settings_json(config.chat, triage=bool(triage)),
         "permission_mode": "default",
         "can_use_tool": can_use_tool,
         "system_prompt": {
             "type": "preset",
             "preset": "claude_code",
-            "append": prompts.system_append(str(harness.SCRIPTS), triage=triage),
+            "append": prompts.system_append(str(harness.SCRIPTS), triage=bool(triage)),
         },
-        # In a triage-only session the harness scripts refuse to write to any record but the triage's own.
-        "env": {"SRE_HARNESS_SITE": str(config.site_root), **({harness.sre_common.TRIAGE_ENV: "1"} if triage else {})},
+        # A triage-only session carries its token: the harness scripts let it write only to the record it opened.
+        "env": {
+            "SRE_HARNESS_SITE": str(config.site_root),
+            **({harness.sre_common.TRIAGE_ENV: triage} if triage else {}),
+        },
         "resume": resume,
         "stderr": lambda line: log.debug("agent: %s", line),
     }
@@ -87,7 +90,7 @@ def build(config: Config) -> Gateway:
         extra["runner_password"] = config.runner_auth[1]
     secrets = harness.outbound_secrets(extra=extra, names=config.credential_names())
 
-    def driver_factory(ask: AskPermission, triage: bool) -> SdkDriver:
+    def driver_factory(ask: AskPermission, triage: str | None) -> SdkDriver:
         return SdkDriver(lambda resume, can_use: agent_options(config, resume, can_use, triage), ask)
 
     settings = Settings(
