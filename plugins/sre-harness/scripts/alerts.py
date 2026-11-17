@@ -198,8 +198,12 @@ def host_services(site_root: Path, doc: dict[str, Any]) -> dict[str, list[tuple[
     entities = catalog_check.load_entities(site_root / doc["catalog"]["path"], report)
     resources: dict[str, str] = {}
     for entity in entities:
-        host = ((entity.spec.get("sre") or {}).get("monitoring") or {}).get("host")
-        if entity.doc["kind"] == "Resource" and host:
+        if entity.doc["kind"] != "Resource":
+            # A service's sre.monitoring is a list of "host: check" notes, not a monitored host.
+            continue
+        monitoring = (entity.spec.get("sre") or {}).get("monitoring")
+        host = monitoring.get("host") if isinstance(monitoring, dict) else None
+        if host:
             resources[entity.ref] = host
     found: dict[str, list[tuple[str, int | None]]] = {}
     for entity in entities:

@@ -64,7 +64,10 @@ def runner_site(edit_site):
     for name, host in (("monitored-web", "web01"), ("monitored-lab", "lab01")):
         (catalog / "generated" / "checks" / f"{name}.yaml").write_text(yaml.safe_dump(monitored(name, host)))
     (catalog / "services" / "shop.yaml").write_text(yaml.safe_dump(service("shop", 1, ["resource:monitored-web"])))
-    (catalog / "services" / "toy.yaml").write_text(yaml.safe_dump(service("toy", 3, ["resource:monitored-lab"])))
+    toy = service("toy", 3, ["resource:monitored-lab"])
+    # Hand-written services list checks as notes; the index must not mistake them for a monitored host.
+    toy["spec"]["sre"]["monitoring"] = ["lab01: Disk"]
+    (catalog / "services" / "toy.yaml").write_text(yaml.safe_dump(toy))
     return site
 
 
