@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 @dataclass
-class Conversation:
+class Conversation:  # pylint: disable=too-many-instance-attributes  # a persisted record
     key: str
     channel: str
     thread: str | None = None
@@ -26,6 +26,8 @@ class Conversation:
     policy: str = "chat"
     # A triage-only session's token: the harness scripts let it write only to the record it opened.
     triage_token: str = ""
+    # The agent has closed or dismissed the incident; its channel stays until the archive sweep.
+    ended: bool = False
 
 
 class Store:

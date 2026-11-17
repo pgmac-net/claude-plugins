@@ -10,7 +10,7 @@ ADR 0006 allowed an unattended run to open an incident, gather evidence and prop
 
 **The first message from a responder ends triage-only, once.** The gateway records a `policy_change` in the audit log (who, and a link to their message), stops the agent, and resumes the same session under the normal chat policy, so approvals work as in ADR 0013. A session never goes back to triage-only.
 
-**Storms are bounded by grouping, not by the model.** All new problems from one poll become one triage. While a real incident's conversation is open, new problems are posted into it instead of starting another. Alert-started sessions are capped at `max_auto_sessions` within `max_sessions`; over the cap the hub is told and no session starts. A service that was just triaged waits `cooldown_minutes` before another triage starts for it; the cooldown never stops an alert being relayed into an open incident.
+**Storms are bounded by grouping, not by the model.** All new problems from one poll become one triage. While a real incident's conversation is open, new problems are posted into it instead of starting another. So only one unattended triage is ever being worked; drills, and incidents already closed or dismissed, do not count. A service that was just triaged waits `cooldown_minutes` before another triage starts for it; the cooldown never stops an alert being relayed into an open incident.
 
 We rejected a webhook from Nagios notifications (an inbound port, and it fires on every re-notification) and reacting to the existing Slack alert posts (couples the runner to a message format, and the poster is a bot, not a responder).
 

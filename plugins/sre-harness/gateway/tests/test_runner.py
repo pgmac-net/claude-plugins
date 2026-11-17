@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -167,14 +168,49 @@ async def test_alerts_go_into_an_open_incident_instead_of_a_new_one(state):
     assert "web01/Ping is CRITICAL [component:shop]" in log["messages"][-1]
 
 
-async def test_capacity_full_is_announced_not_started(state):
-    gateway, chat, _records, _policies = make(state, [[]], {}, FakeFeed([alert()]))
+async def test_a_drill_never_holds_back_a_real_triage(state):
+    gateway, chat, _records, _policies = make(state, [[], []], {}, FakeFeed([alert()]))
     await gateway.on_command(Command("incident", OWNER, HUB, "drill alert web01/HTTP pretend it broke"))
     await settle()
     await gateway.poll_once()
     await settle()
-    assert len(gateway.sessions) == 1
-    assert any("Triage capacity is full" in text for text in chat.texts())
+    kinds = sorted(s.conv.drill for s in gateway.sessions.values())
+    assert kinds == [False, True]
+    assert not any("capacity" in text.lower() for text in chat.texts())
+
+
+async def test_a_dismissed_triage_takes_no_more_alerts(state):
+    private = write_incident(state, number=12)
+    dismiss = "uv run /opt/plugin/scripts/incident.py dismiss --by Owner --reason flap"
+    script = [
+        [*opened_auto(private), ToolCall("t-d", "Bash", {"command": dismiss}), ToolOutput("t-d", "dismissed", False)],
+        [],
+    ]
+    feed = FakeFeed([alert()], index={"web01": [("component:shop", 1)], "web02": [("component:web", 1)]})
+    gateway, _chat, _records, _policies = make(state, script, {}, feed)
+    await gateway.poll_once()
+    await settle(60)
+    first = only(gateway.sessions.values())
+    assert first.conv.ended and not first.conv.archived
+    feed.result = [alert("Ping", host="web02", since=NOW - 300)]
+    await gateway.poll_once()
+    await settle(60)
+    assert len(gateway.sessions) == 2
+
+
+async def test_closed_incidents_are_archived_soon_after_start(state, monkeypatch):
+    monkeypatch.setattr("sre_gateway.gateway.ARCHIVE_FIRST_SECONDS", 0)
+    gateway, chat, _records, _policies = make(state, [[]], {}, FakeFeed())
+    write_incident(state, number=12)
+    await gateway.on_command(Command("incident", OWNER, HUB, "drill alert web01/HTTP pretend it broke"))
+    await settle()
+    session = only(gateway.sessions.values())
+    session.conv.incident, session.conv.thread = "incidents-12", None
+    gateway.tracker.closed.add("incidents-12")
+    task = asyncio.create_task(gateway._archive_loop())  # pylint: disable=protected-access
+    await settle(30)
+    task.cancel()
+    assert session.conv.archived and chat.archived
 
 
 async def test_drill_alert_command_starts_a_drill_triage(state):

@@ -142,7 +142,7 @@ chat: {}
 #   tiers: [1]
 #   tracker_repo: catalog
 #   poll_seconds: 60
-#   max_auto_sessions: 1               # within chat.max_sessions
+#   max_auto_sessions: 1               # reserved: alerts join an open triage, so one runs at a time
 #   cooldown_minutes: 30
 #   min_state_age_seconds: 120
 runner: {}
