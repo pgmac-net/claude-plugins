@@ -105,6 +105,24 @@ def credential_names(incident_id: str) -> list[str]:
         return []
 
 
+DEFAULT_AGENT = "claude-code"
+AGENT_NAME = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,119}$")
+
+
+def agent_of(payload: dict[str, Any]) -> tuple[str, str | None]:
+    """(agent, model) for a record. Claude Code's hook payload names neither: it is the default agent.
+
+    Another agent's adapter adds 'agent' and 'model' to the payload. A value of
+    the wrong shape is recorded as 'unknown' rather than trusted.
+    """
+    agent = payload.get("agent", DEFAULT_AGENT)
+    model = payload.get("model")
+    agent = agent if isinstance(agent, str) and AGENT_NAME.match(agent) else "unknown"
+    model = model if isinstance(model, str) and MODEL_NAME.match(model) else None
+    return agent, model
+
+
 def build_record(payload: dict[str, Any], incident_id: str, capture: str = "hook") -> dict[str, Any]:
     """One audit record from a hook payload. Inputs are redacted; output is hashed, not kept."""
     env_values = redact.env_secrets(extra_names=credential_names(incident_id))
@@ -118,6 +136,9 @@ def build_record(payload: dict[str, Any], incident_id: str, capture: str = "hook
         "tool": payload.get("tool_name"),
         "input": redact.redact(payload.get("tool_input") or {}, env_values),
     }
+    record["agent"], model = agent_of(payload)
+    if model:
+        record["model"] = model
     if isinstance(payload.get("tool_use_id"), str):
         # Ties an attempt to the approval a chat gateway recorded for that one call.
         record["tool_use_id"] = payload["tool_use_id"][:128]

@@ -222,6 +222,9 @@ uv run scripts/trends.py [--as-of YYYY-MM-DD] [--pirs <dir>] [--json]
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
 | `gateway/` | The chat-ops gateway: Slack Socket Mode, approval requests, sessions per incident, unattended triage ([gateway/README.md](gateway/README.md)) |
+| `AGENTS.md` | How an agent other than Claude Code uses the harness: where things are, the rules that always hold, self-reported audit |
+| `adapters/pi/sre-audit.ts` | Pi extension: feeds Pi's tool calls to the audit hook, recording `agent: pi` and the model |
+| `docs/supported-agents.md` | Which agents and models have run the alert drill, step by step: the supported floor |
 | `templates/site-repo/` | Starter layout for a new site repository |
 | `docs/adr/` | Design decisions |
 | `CONTEXT.md` | Glossary |
