@@ -148,7 +148,8 @@ A portable SRE harness: the plugin holds logic only, and everything about one si
 | `catalog-sync` | Regenerate the catalog's generated layer from the site's Ansible, ArgoCD and Nagios source checkouts, report drift, and propose the change as a pull request. |
 | `describe-service` | Interview the user and write one valid service entry in the site catalog: tier, purpose, dependencies, pattern, runbooks. |
 | `start-incident` | Work a live incident against the configured site: open the tracking issue, triage using the site's procedures and catalog, gate every mutation on confirmation, keep a typed timeline with status updates, handover and summary. Supports drills. |
-| `create-pir` | Write the post-incident review from the timeline export: Infinite How's analysis, runbook decisions, catalog corrections, tracked action items, pull request. |
+| `create-pir` | Write the post-incident review from the timeline export: Infinite How's analysis (with an optional CAST section), runbook decisions, catalog corrections, tracked action items, pull request. |
+| `design-review` | Targeted STPA analysis of one service: losses, control structure, unsafe control actions and loss scenarios, drafted from evidence and gated step by step. Files uncontrolled scenarios as `design-review` issues. |
 
 `start-incident` and `create-pir` exist in both plugins while the portable versions are proven. In Claude Code, invoke the one you mean by its prefix (`/sre-harness:start-incident`). Pi and OpenCode load one skill per name and keep the first they find, which is the `pgmac-workflows` one.
 

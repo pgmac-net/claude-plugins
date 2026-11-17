@@ -1,6 +1,6 @@
 # sre-harness site configuration. Validate with the plugin's scripts/validate_site.py.
 # Never put a secret here: name the environment variable that holds it.
-schema_version: 5
+schema_version: 6
 
 site:
   name: example
@@ -141,3 +141,14 @@ chat: {}
 #   rules_file: slo/rules.yaml
 #   dashboard_file: slo/dashboard.json   # optional: slo.py dashboard writes a Grafana dashboard for every SLO
 slo: {}
+
+# Reliability design (skill design-review, scripts stpa.py and trends.py).
+# Every key is optional; empty means the defaults shown.
+# reliability:
+#   analyses_path: analyses/stpa        # one STPA analysis per service: <service>.md
+#   theme_min_pirs: 3                   # PIRs on one service or tag that make a recurring theme
+#   theme_window_days: 180              # rolling window for themes
+#   stale_action_days: 60               # an open action item older than this is stale
+#   action_labels: [incident, design-review]
+#   ignore_tags: []                     # tags never counted as a theme
+reliability: {}

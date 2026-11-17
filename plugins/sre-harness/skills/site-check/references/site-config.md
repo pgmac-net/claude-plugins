@@ -37,6 +37,7 @@ The output gives `site_root`. After a valid result, read `<site_root>/site.yaml`
 | `incident` | Time zone, severity criteria, status-update intervals, site procedures per stage, evidence directory, drill tracker, the pre-approved action list, and the optional advisory helper |
 | `chat` | The chat-ops gateway: adapter, hub channel ID, responder and approver user IDs, approval expiry, session limits, extra read-only allow rules, and the names of the token environment variables. Empty means no gateway |
 | `slo` | The metrics backend SLIs are evaluated by (URL, basic-auth user, name of the read-token variable or file, retention), where journeys live, and where generated rules are written. Empty means no SLOs |
+| `reliability` | Optional. Where STPA analyses live (`analyses_path`) and the recommendations backlog's thresholds: theme size and window, when an action item is stale, which labels mark action items, tags never counted. Defaults when absent |
 
 Schemas: `<plugin root>/schemas/site.schema.json` (version 4), `tiers.schema.json`, `entity.schema.json`. Unknown keys are errors.
 

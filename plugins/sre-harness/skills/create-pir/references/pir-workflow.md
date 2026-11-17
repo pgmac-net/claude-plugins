@@ -9,7 +9,7 @@ Site specifics come from the site's `review` procedures: template, format, namin
 - Final severity, by the site's criteria. The tracking issue holds a provisional value; confirm it now and record it with `incident.py set --severity <level> --final`.
 - Resolution state: resolved, partially resolved, or still being watched.
 - Impact in one or two sentences, in the users' terms. A service's `sre.purpose` in the catalog is a good starting point.
-- Affected services and the Resources they run on.
+- Affected services and the Resources they run on. Record the services as catalog names in the front matter's `services:` list; the recommendations backlog (`trends.py`) attributes the review by it.
 
 **Timeline**
 - First notice, key diagnostics and what they found, each action and its effect, each service's recovery, full resolution.
@@ -32,6 +32,10 @@ Where a detail is missing, make a reasonable inference and mark it as one.
 ## Step 2 — Infinite How's
 
 Method: `infinite-hows.md`. Target four to seven "how" levels per chain. Stop only at something an action item can close.
+
+### CAST, when asked or accepted
+
+If the user asked for CAST, or the timeline shows an automated controller acting or failing to act and the user accepted the offer, write the CAST section now, after the chains: `cast.md`. Offer it at most once per review. Proposals it makes to the service's STPA analysis go into the site repository's change set with the audit log (step 11), or a pull request of their own.
 
 ## Step 3 — Name
 
@@ -111,6 +115,8 @@ This opens a second pull request, against the site's private audit location, and
 - [ ] Every action item is a real, linked issue.
 - [ ] Evidence that proves cause or recovery is embedded and committed, or its absence is an action item.
 - [ ] Final severity is recorded on the tracking issue.
+- [ ] `services:` in the front matter lists the affected catalog services.
+- [ ] CAST: included if asked for; offered once if an automated controller was involved; any new UCA or scenario proposed to the STPA analysis.
 
 **Runbooks**
 - [ ] The create, extend or skip decision is explicit for each chain.

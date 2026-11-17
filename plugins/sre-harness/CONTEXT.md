@@ -229,3 +229,53 @@ _Avoid_: Approval card, confirmation prompt
 **PIR**:
 A post-incident review: the written analysis of an incident's causes and the actions that follow.
 _Avoid_: Post-mortem, RCA document
+
+### Reliability design
+
+**Design review**:
+A targeted STPA analysis of one service's control structure, drafted from evidence and gated by a person at every step. Recorded as one analysis file per service in the site repository.
+_Avoid_: Architecture review, audit
+
+**Control structure**:
+The controllers that act on a service, the processes they act on, the control actions between them and the feedback that comes back.
+_Avoid_: Architecture diagram, topology
+
+**Controller**:
+Anything that decides and acts on a process: a person, an automated handler, or software. Automated controllers act with no person in the loop.
+_Avoid_: Operator (only one kind of controller), agent
+
+**Control action**:
+One thing a controller can do to a process or to another controller.
+_Avoid_: Command, operation
+
+**Feedback**:
+What tells a controller the state of what it controls. Present, inadequate or missing.
+_Avoid_: Monitoring (one source of feedback), telemetry
+
+**Process model**:
+What a controller believes about the process it controls. Most unsafe actions come from a process model that is wrong.
+_Avoid_: Assumption, mental model
+
+**Unsafe control action (UCA)**:
+A control action that, in a stated context, leads to a hazard: not provided, provided unsafely, at the wrong time or order, or for the wrong duration.
+_Avoid_: Bad action, mistake
+
+**Loss scenario**:
+How an unsafe control action could come about, by its causal factors. Controlled when a working control handles it today; uncontrolled otherwise.
+_Avoid_: Failure mode, risk
+
+**Design-review finding**:
+An uncontrolled loss scenario, tracked by one issue with the `design-review` label.
+_Avoid_: Recommendation (that is the backlog's word), defect
+
+**CAST**:
+The STPA control model applied to one incident in a PIR: per controller, what it did, what it believed and what it was told. Optional, beside Infinite How's.
+_Avoid_: Root cause analysis (Infinite How's is the RCA)
+
+**Recurring theme**:
+A service or PIR tag that appears on at least the site's threshold of PIRs inside the rolling window.
+_Avoid_: Trend, pattern (a pattern is a deployment pattern)
+
+**Recommendations backlog**:
+The open action items (issues labelled `incident` or `design-review`), ranked by rules from PIR trends, with the design reviews that are due. Shown in the reliability report.
+_Avoid_: Wishlist, roadmap

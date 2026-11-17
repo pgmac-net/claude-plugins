@@ -1,7 +1,7 @@
 ---
 name: create-pir
-description: This skill should be used when the user says "create a PIR", "write a post-incident review", "generate an incident report", "document this incident", "write a post-mortem", "capture this incident", or asks for formal incident documentation once an incident is resolved. Writes the review from the incident's timeline, applies Infinite How's root cause analysis, evaluates runbooks, files action items and raises a pull request.
-version: 0.5.0
+description: This skill should be used when the user says "create a PIR", "write a post-incident review", "generate an incident report", "document this incident", "write a post-mortem", "capture this incident", "add a CAST section", "PIR with CAST", or asks for formal incident documentation once an incident is resolved. Writes the review from the incident's timeline, applies Infinite How's root cause analysis (and CAST on request), evaluates runbooks, files action items and raises a pull request.
+version: 0.6.0
 ---
 
 # Create a post-incident review (PIR)
@@ -31,8 +31,9 @@ With no tracking issue, extract from the conversation alone and say so in the do
 
 ## The steps
 
-1. **Extract** metadata (dates, duration, severity, resolution, impact, affected services), the timeline, one to four root-cause chains, and action items. Collect evidence gathered during the incident; if the site's `evidence` procedures can still produce something that proves cause or recovery, produce it now, before it expires.
+1. **Extract** metadata (dates, duration, severity, resolution, impact, affected services as catalog names for the `services:` front-matter line), the timeline, one to four root-cause chains, and action items. Collect evidence gathered during the incident; if the site's `evidence` procedures can still produce something that proves cause or recovery, produce it now, before it expires.
 2. **Root-cause** each chain with Infinite How's: `references/infinite-hows.md`.
+   - **CAST, optional**: add a CAST section when the user asks. When the timeline shows an automated controller acting or failing to act (self-heal, watchdog, GitOps self-heal, scheduled job), offer it once. It reuses the service's STPA analysis and proposes anything new back to it: `references/cast.md`.
 3. **Name** the document by the site's convention.
 4. **Write** it against the site's template. Embed evidence where it proves a claim.
 5. **Runbooks**: for each chain, decide create, extend or skip, and act on it.
@@ -52,10 +53,12 @@ Detail for every step, and the closing checklist: `references/pir-workflow.md`.
 - Do not stop a chain at "the component failed" or "nobody knew". See the stopping rules in `references/infinite-hows.md`.
 - Evidence links that expire do not belong in a permanent document. Commit the artefact.
 - Step 6 is new to most people and easy to skip. The incident is the best test the catalog ever gets.
+- `services:` in the front matter is what the recommendations backlog (`trends.py`) counts. Use catalog names; a PIR without it is matched on tags, and one that matches nothing is reported as unattributed.
 
 ## References
 
 - `references/pir-workflow.md` — each step in detail, and the quality checklist
 - `references/infinite-hows.md` — the root-cause drilling method
+- `references/cast.md` — the optional CAST lens and how it feeds the STPA analysis
 - `../start-incident/references/incident-record.md` — timeline entry types and export
 - `../start-incident/references/catalog-in-an-incident.md` — reading the catalog

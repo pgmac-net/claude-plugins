@@ -82,6 +82,10 @@ def tracker(monkeypatch):
     issues: list[dict] = []
 
     def fake_gh(args, stdin=None, timeout=None):  # pylint: disable=unused-argument
+        if args[:2] == ["search", "issues"]:
+            return "[]"
+        if args[0] == "api":
+            return "ok"
         assert args[:2] == ["issue", "list"]
         return json.dumps(issues)
 
@@ -120,6 +124,9 @@ def test_report_sections_and_figures(report_site, tracker, tmp_path):
     assert "Days burning fast: 1. Days exhausted: 1." in text
     assert "Days frozen, with Tier 2 off: 1." in text
     assert "| [#7](https://example.com/i/7) Incident 7 | P2 |" in text
+    backlog = text[text.index("## Recommendations backlog") :]
+    assert "dated after 2026-06-03 up to 2026-11-30" in backlog
+    assert "**Not complete:** PIRs not read" in backlog
     assert "budget exhausted on 1 day(s)" in text
     assert "| example-service | `example-open-app` | 99.5% |" in text
 
