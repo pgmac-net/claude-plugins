@@ -28,6 +28,8 @@ steps:
     depends_on: [component:cluster-control-plane]
     measured_by: canary probe
 error_budget_policy: error-budget-policy.md
+# Optional. Frozen as well, with Tier 2 off, while this journey's budget is exhausted.
+suspends: [component:cluster-control-plane, component:dns]
 ---
 ```
 
@@ -105,7 +107,7 @@ Per SLO, labelled `slo`, `service`, `journey` and `budget`:
 | `slo:objective:ratio` | The target |
 | `slo:error_budget:remaining_ratio` | 1 − error ratio over the window ÷ (1 − target); below 0 means exhausted |
 
-`slo.py status` reads these and reports a state: **healthy**; **burning fast** (1-hour burn over 14.4 or 6-hour burn over 6); **exhausted** (no budget left); **unknown** (no data); **informational** (not budgeted).
+`slo.py status` reads these and reports a state: **healthy**; **burning fast** (1-hour burn over 14.4 or 6-hour burn over 6); **exhausted** (no budget left); **unknown** (no data); **informational** (not budgeted). While a budgeted SLO is exhausted it is `frozen`, and its `freeze_scope` is the journey's service plus its `suspends:`. `budget.py nagios` reports the same states to Nagios, and `autonomy.py` keeps every service in the scope at Tier 1, failing closed when the state is unknown.
 
 ## Error-budget policy
 
@@ -115,8 +117,8 @@ Per SLO, labelled `slo`, `service`, `journey` and `budget`:
 | State | What changes |
 |---|---|
 | Healthy | Normal change. Risky changes and experiments are fine. |
-| Burning fast | An alert fires. Look before making further changes. |
-| Exhausted | Freeze risky changes to <service> and its dependencies. Switch Tier 2 actions off for them. Reliability work first until the budget recovers. |
+| Burning fast | The Nagios check warns. Look before making further changes. |
+| Exhausted | Freeze risky changes to <service> and what `suspends:` lists. Tier 2 actions are switched off for them automatically. Reliability work first until the budget recovers. |
 
 Exceptions: <who can override, and how it is recorded>.
 Review: <when the target and this policy are next looked at>.

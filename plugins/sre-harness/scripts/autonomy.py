@@ -11,8 +11,10 @@ conservative character set (letters, digits and . _ : / = @ , + - separated
 by single spaces: no quoting, no shell operators, nothing a shell would
 expand), is token for token equal to a listed template with every variable
 part satisfying that template's rule, is for a service that is not
-suspended, and is within the action's limit for this incident. Everything
-else is Tier 1: stop and ask.
+suspended, and is within the action's limit for this incident. A service
+is also suspended while an error budget that governs it is exhausted, or
+its state cannot be read (see budget.py): the budget is checked live, at
+the moment of the decision. Everything else is Tier 1: stop and ask.
 
 A Tier 2 action is executed by this script, as an argument list with no
 shell. The agent never passes a pre-approved command to a shell itself, so
@@ -39,10 +41,12 @@ import re
 import shutil
 import subprocess  # noqa: S404 - argument list, no shell
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import audit_hook
+import budget
 import redact
 import sre_common
 from sre_common import SiteError, guarded, load_site, load_yaml, schema_errors
@@ -154,8 +158,18 @@ def _unavailable(allow: dict[str, Any], action: dict[str, Any], service: str | N
     return None
 
 
-def decide(allow: dict[str, Any], command: str, service: str | None, incident_id: str | None) -> dict[str, Any]:
-    """The tier of one command, and why."""
+def decide(
+    allow: dict[str, Any],
+    command: str,
+    service: str | None,
+    incident_id: str | None,
+    gate: Callable[[str], str | None] | None = None,
+) -> dict[str, Any]:
+    """The tier of one command, and why.
+
+    'gate' says why an error budget keeps a service at Tier 1, or None. It is
+    asked only about an action that would otherwise be Tier 2.
+    """
     if not allow.get("tier2_enabled"):
         return tier1("Tier 2 is switched off for this site")
     if not SAFE_COMMAND.fullmatch(command):
@@ -179,6 +193,9 @@ def decide(allow: dict[str, Any], command: str, service: str | None, incident_id
         if problem:
             near = near or problem
             continue
+        suspended = gate(action["service"]) if gate else None
+        if suspended:
+            return {**tier1(suspended), "budget_suspended": True, "action": action["id"], "service": action["service"]}
         return {
             "tier": 2,
             "action": action["id"],
@@ -197,8 +214,25 @@ def record(incident_id: str, event: str, **fields: Any) -> None:
     audit_hook.self_report(incident_id, event, **fields)
 
 
+def record_suspension(incident_id: str | None, decision: dict[str, Any], command: str) -> None:
+    """Put a budget suspension in the audit log, when there is an incident to put it in."""
+    if not incident_id or not decision.get("budget_suspended"):
+        return
+    env_values = redact.env_secrets(extra_names=audit_hook.credential_names(incident_id))
+    record(
+        incident_id,
+        "tier2_suspended",
+        action=decision["action"],
+        service=decision["service"],
+        command=redact.redact_text(command, env_values),
+        reason=decision["reason"],
+    )
+
+
 def cmd_match(args: argparse.Namespace, allow: dict[str, Any], incident_id: str | None) -> int:
-    print(json.dumps(decide(allow, args.command_text, args.service, incident_id), indent=2))
+    decision = decide(allow, args.command_text, args.service, incident_id, args.gate)
+    record_suspension(incident_id, decision, args.command_text)
+    print(json.dumps(decision, indent=2))
     return 0
 
 
@@ -216,7 +250,8 @@ def cmd_run(args: argparse.Namespace, allow: dict[str, Any], incident_id: str | 
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("w", encoding="utf-8") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        decision = decide(allow, args.command_text, args.service, incident_id)
+        decision = decide(allow, args.command_text, args.service, incident_id, args.gate)
+        record_suspension(incident_id, decision, args.command_text)
         if decision["tier"] == 2 and not args.precondition_evidence:
             decision = tier1(
                 f"action '{decision['action']}' matches, but no --precondition-evidence was given. "
@@ -283,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     def action() -> int:
         site_root, doc = load_site(args.site)
         allow = load_allow_list(site_root, doc)
+        args.gate = budget.BudgetGate(site_root, doc).reason
         incident_id = args.incident
         if incident_id is None:
             try:

@@ -35,6 +35,7 @@ If the answer is `"tier": 1`, treat it as any other mutation: state the blast ra
 - Token for token equal to the template. An extra flag, a missing flag, `sudo` in front, or an environment assignment in front is Tier 1.
 - Every `{placeholder}` value passes its rule: one of a fixed set, or a whole-value pattern.
 - The action is enabled, its service is not suspended, the site-wide switch is on, and the action has not reached its limit for this incident.
+- No error budget forbids it. The script reads the budget live, at the moment of the decision: if an SLO whose freeze scope includes the action's service is exhausted, or its state is unknown, or the metrics backend cannot be read, the answer is Tier 1 with `"budget_suspended": true` and the reason, and a `tier2_suspended` record goes into the audit log. A service no budgeted SLO governs is unaffected.
 
 ## The precondition is yours to prove
 

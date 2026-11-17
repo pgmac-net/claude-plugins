@@ -59,6 +59,15 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]+\\.md$",
       "description": "Policy file in the same directory."
+    },
+    "suspends": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^component:[a-z0-9][a-z0-9-]*$"
+      },
+      "description": "Other services frozen, with Tier 2 switched off, while this journey's budget is exhausted. The journey's own service always is."
     }
   }
 }

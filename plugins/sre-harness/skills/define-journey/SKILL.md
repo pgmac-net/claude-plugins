@@ -1,7 +1,7 @@
 ---
 name: define-journey
 description: This skill should be used when the user says "define a journey", "write a user journey", "add an SLO", "set an SLO for <service>", "what should this service's SLI be", "write an error budget policy", or when a Tier 1 service is reported as having no journey. Interviews the product owner and writes a journey, its OpenSLO definitions and its error-budget policy beside the service's catalog entry, then generates the recording rules.
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Define a Journey
@@ -28,7 +28,7 @@ Ask one question at a time. Offer a concrete suggestion each time, drawn from th
    - A **probe** (gauge, `counter: false`) counts a prober that goes silent as failing: use it for the SLI that spends budget.
    - A **request ratio** (counter, `counter: true`) cannot tell this service's failure from an application behind it. Record it with `sre-harness/budget: "false"` unless the service owns every response.
 4. **The target and window.** The window must fit the backend's retention (`retention_days`); with 14 days, use 7d. Show the budget in minutes for each target you offer (window minutes × (1 − target)). Start where the service is today, not where it should be; say when to review it.
-5. **The error-budget policy.** What healthy, burning fast and exhausted each change for this service. At minimum: exhausted freezes risky changes to the service and what it depends on, and puts reliability work first.
+5. **The error-budget policy.** What healthy, burning fast and exhausted each change for this service. At minimum: exhausted freezes risky changes to the service and what it depends on, and puts reliability work first. The freeze is enforced for the journey's own service. Ask which other services it also covers, and list them in the journey's `suspends:`: those are frozen too, with their pre-approved actions switched off, while the budget is exhausted. Name only what the owner agrees to; the catalog's dependencies are a prompt, not the answer.
 
 If a signal does not exist yet, write the files anyway and say what must be built for the SLI to have data. Do not invent a query that has never returned data.
 
