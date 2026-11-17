@@ -51,7 +51,9 @@ ALERT_MESSAGE = """\
 [alert] The alert source reports {count} new problem(s) on catalog services. This is {kind}.
 {lines}
 
-Triage it with the sre-harness start-incident skill, as an unattended triage.{drill_note}"""
+Triage it with the sre-harness start-incident skill, as an unattended triage. Open its record with \
+`incident.py open --auto` (private, until a responder promotes it), even if a responder has already spoken \
+here.{drill_note}"""
 
 JOINED_MESSAGE = """\
 [gateway] {name} is the first responder to speak here. This session is no longer triage-only: from now on a \
