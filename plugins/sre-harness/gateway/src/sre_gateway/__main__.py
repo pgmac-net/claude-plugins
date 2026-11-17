@@ -42,7 +42,8 @@ def agent_options(config: Config, resume: str | None, can_use_tool: Any, triage:
             "preset": "claude_code",
             "append": prompts.system_append(str(harness.SCRIPTS), triage=triage),
         },
-        "env": {"SRE_HARNESS_SITE": str(config.site_root)},
+        # In a triage-only session the harness scripts refuse to write to any record but the triage's own.
+        "env": {"SRE_HARNESS_SITE": str(config.site_root), **({harness.sre_common.TRIAGE_ENV: "1"} if triage else {})},
         "resume": resume,
         "stderr": lambda line: log.debug("agent: %s", line),
     }

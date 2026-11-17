@@ -335,6 +335,7 @@ def cmd_status(args: argparse.Namespace, _doc: dict[str, Any]) -> int:
 
 def apply_changes(state: dict[str, Any], changes: dict[str, str], final: bool = False) -> None:
     """Edit the issue body in place and mirror severity and phase into local state."""
+    sre_common.check_triage_write(state)
     body = json.loads(
         sre_common.run_gh(["issue", "view", str(state["number"]), "--repo", state["repo"], "--json", "body"])
     )["body"]

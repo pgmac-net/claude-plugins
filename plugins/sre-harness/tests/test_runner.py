@@ -277,6 +277,19 @@ class TestPrivateRecord:
 
 
 class TestTriagePolicy:
+    def test_a_triage_session_cannot_write_to_a_person_incident(self, gh, capsys, monkeypatch):
+        assert incident.main(["open", "--title", "People are on it", "--severity", "P2"]) == 0
+        person = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["id"]
+        own = open_auto(capsys, "--new")["id"]
+        monkeypatch.setenv(sre_common.TRIAGE_ENV, "1")
+        comments = len(gh.comments)
+        assert timeline.main(["--incident", person, "add", "--type", "discovery", "--text", "x"]) == 2
+        assert "unattended triage" in capsys.readouterr().err
+        assert incident.main(["set", "--incident", person, "--phase", "Diagnosing"]) == 2
+        assert len(gh.comments) == comments
+        assert timeline.main(["--incident", own, "add", "--type", "discovery", "--text", "ok"]) == 0
+        assert incident.main(["set", "--incident", own, "--phase", "Diagnosing"]) == 0
+
     def test_triage_withholds_record_changes_and_allows_only_auto_open(self, tmp_path):
         rules = chat_policy.triage_rules({}, tmp_path)
         script = tmp_path / "incident.py"

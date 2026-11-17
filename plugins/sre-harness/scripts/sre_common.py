@@ -264,6 +264,23 @@ def write_incident_state(state: dict[str, Any], make_current: bool = True) -> No
         (state_dir() / "current").write_text(state["id"] + "\n", encoding="utf-8")
 
 
+TRIAGE_ENV = "SRE_HARNESS_TRIAGE"
+
+
+def check_triage_write(state: dict[str, Any]) -> None:
+    """Refuse a write to any record but an unattended triage's own, when running inside one.
+
+    The chat gateway sets SRE_HARNESS_TRIAGE=1 for a triage-only session. Its
+    permission rules allow the timeline and 'incident.py set', which take
+    --incident; without this check the session could write unreviewed text into
+    an incident a person owns by naming it.
+    """
+    if os.environ.get(TRIAGE_ENV) == "1" and not state.get("auto"):
+        raise SiteError(
+            f"this session is an unattended triage; it may write only to its own triage record, not {state['id']}"
+        )
+
+
 def guarded(action: Callable[[], int]) -> int:
     """Run a command body; a SiteError becomes a message on stderr and exit code 2."""
     try:
