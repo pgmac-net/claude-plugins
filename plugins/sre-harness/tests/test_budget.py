@@ -24,6 +24,10 @@ OWNER = "user:example-owner"
 
 @pytest.fixture
 def budget_site(edit_site):
+    return make_budget_site(edit_site)
+
+
+def make_budget_site(edit_site) -> Path:
     """A site with one budgeted SLO on example-service, whose journey also suspends other-service."""
 
     def mutate(doc):
@@ -244,14 +248,14 @@ def test_nagios_output_is_ascii_and_never_splits_perfdata():
 
 def test_nagios_command_reports_problems_as_unknown(budget_site, monkeypatch, capsys):
     monkeypatch.delenv("TEST_METRICS_TOKEN", raising=False)
-    assert slo.main(["--site", str(budget_site), "nagios"]) == 3
+    assert budget.main(["--site", str(budget_site), "nagios"]) == 3
     assert capsys.readouterr().out.startswith("SLO UNKNOWN - no metrics read token")
 
 
 def test_nagios_command_end_to_end(budget_site, monkeypatch, capsys):
     monkeypatch.setenv("TEST_METRICS_TOKEN", "token-for-tests")
     monkeypatch.setattr(slo, "query", backend(0.006))
-    assert slo.main(["--site", str(budget_site), "nagios", "--slo", "example-open-app"]) == 2
+    assert budget.main(["--site", str(budget_site), "nagios", "--slo", "example-open-app"]) == 2
     assert "FREEZE example-service, other-service" in capsys.readouterr().out
 
 
@@ -276,6 +280,8 @@ def history_backend(no_data: set[date] | None = None, exhausted: set[date] | Non
             value = 0.75
         elif promql.startswith("max_over_time"):
             value = 0.001
+        elif promql.startswith("count_over_time"):
+            value = 1440
         else:
             value = 0.002
         return [{"metric": {"slo": "example-open-app"}, "value": [at, str(value)]}]
@@ -306,6 +312,7 @@ def test_first_run_backfills_every_day_inside_retention(budget_site, monkeypatch
     assert last["captured"] == "on time"
     assert lines(history)[0]["captured"] == "backfilled"
     assert last["attainment_1d"] == 0.998
+    assert last["data_minutes"] == 1440
     assert last["state"] == "healthy"
     assert last["freeze_scope"] == [SERVICE, OTHER]
 
@@ -353,5 +360,5 @@ def test_snapshot_queries_each_day_at_its_local_end(budget_site, monkeypatch, tm
 
 def test_snapshot_command_needs_an_existing_directory(budget_site, monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("TEST_METRICS_TOKEN", "token-for-tests")
-    assert slo.main(["--site", str(budget_site), "snapshot", "--out", str(tmp_path / "nope")]) == 2
+    assert budget.main(["--site", str(budget_site), "snapshot", "--out", str(tmp_path / "nope")]) == 2
     assert "does not exist" in capsys.readouterr().err

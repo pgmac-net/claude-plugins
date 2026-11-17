@@ -157,6 +157,20 @@ Ask the agent to "define a journey" (`define-journey`) for a service. It writes 
 
 So use 7-day windows on it, and keep SLI series few: filter at the scraper so only what the SLIs need is shipped. If usage approaches the series cap, in order: tighten the scraper filters; drop request-ratio SLIs and keep the probes; move SLIs to a separate stack. A Tier 1 service with no journey is a warning in `validate_site.py`; a broken journey or SLO file is an error.
 
+## Error budgets and the reliability report
+
+An error budget has consequences. Each budgeted SLO has a **freeze scope**: its journey's service, plus any services the journey lists in `suspends:`. While the budget is exhausted, every service in the scope is **frozen**: `slo.py status` says so, the agent must state the freeze before asking for a mutation there and record the owner's exception if the change is not itself the fix, and `autonomy.py` keeps the services' pre-approved actions at Tier 1. That check is live, at the moment of the decision, and fails closed: a budget in an unknown state, or a backend that cannot be read, also keeps them at Tier 1. Each refusal is a `tier2_suspended` record in the audit log. Design: [ADR 0015](docs/adr/0015-budget-enforcement-is-checked-live-and-fails-closed.md).
+
+```bash
+uv run scripts/budget.py nagios [--slo <name>]   # OK, WARNING burning fast, CRITICAL exhausted (names the freeze), UNKNOWN
+uv run scripts/budget.py snapshot --out <dir>     # one line per SLO per day into <dir>/YYYY-MM.jsonl
+uv run scripts/report.py --month YYYY-MM --history <dir> --out reports/YYYY-MM.md
+```
+
+- **Alerts** come from `budget.py nagios`, run as a Nagios check, so budget alerts share the site's one alerting path. Its own failures are UNKNOWN, never CRITICAL.
+- **Snapshots** keep what the backend's retention would lose. A daily run writes yesterday and fills any missing day still inside retention, so a missed run repairs itself. Each line records the day's attainment, the lowest budget, the highest burn rates, the worst state reached and the minutes actually measured. Design: [ADR 0016](docs/adr/0016-budget-history-is-kept-as-daily-snapshots.md).
+- **The report** is one markdown file a month with a section for every service whose tier requires an SLA report: attainment (the mean of the daily values), days captured, lowest budget, days burning fast, exhausted and frozen, the month's incidents and recommendations from fixed rules. A service with no journey says so. An incident counts against the services on its `Services:` line (`incident.py set --services`); without one, the catalog names in its `Affected:` line; an incident that matches nothing is listed as unattributed. The report exits 1 when a budgeted SLO lacks more than `--max-missing` days of snapshots, after writing.
+
 **From chat.** With a `chat` section in `site.yaml` and the gateway running, a responder starts an incident with `/incident <text>` in Slack. The agent works it in a private channel. Every command that isn't pre-approved waits for a listed approver's click, which is recorded in the audit log. Setup and the threat model: [gateway/README.md](gateway/README.md).
 
 ## Contents
@@ -180,7 +194,9 @@ So use 7-day windows on it, and keep SLI series few: filter at the scraper so on
 | `scripts/autonomy.py` | Decides whether a command is a pre-approved action, and executes it without a shell |
 | `scripts/assist.py` | Optional advisory second opinions from a judgment model, with masking |
 | `scripts/chat_policy.py` | Tool policy for an agent driven from chat: the read-only allow-list, the deny-list, checks on a site's additions |
-| `scripts/slo.py` | Journeys and SLOs: `check`, `generate` (recording rules), `status` (attainment, budget remaining, budget state) |
+| `scripts/slo.py` | Journeys and SLOs: `check`, `generate` (recording rules), `dashboard`, `status` (attainment, budget remaining, budget state, freeze) |
+| `scripts/budget.py` | Error-budget enforcement and history: the live Tier 2 gate, the Nagios check, daily snapshots |
+| `scripts/report.py` | The monthly reliability report, from snapshots, the catalog and the incident tracker |
 | `scripts/kube_read.py` | Read-only kubectl for an agent driven from chat: allowed verbs and options only, checked per argument, no shell |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |

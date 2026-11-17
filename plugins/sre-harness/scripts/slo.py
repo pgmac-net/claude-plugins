@@ -16,10 +16,6 @@ Commands:
   dashboard write a Grafana dashboard for every SLO, reading the recorded series
             (--check: fail if the file is stale)
   status    attainment, budget remaining, budget state and freeze for each SLO
-  nagios    the same as a Nagios check: OK, WARNING burning fast, CRITICAL
-            exhausted, UNKNOWN no data or the backend could not be read
-  snapshot  append one line per SLO per day to a history directory, filling
-            any missing day still inside the backend's retention
 
 Budget maths, all in recording rules so every reader gets the same numbers:
   error ratio over 5 minutes, then its average over 1h, 6h, 1d and the SLO's
@@ -29,7 +25,7 @@ Budget maths, all in recording rules so every reader gets the same numbers:
   errors.
 
 Exit codes: 0 ok, 1 check failed or rules are stale, 2 the site or the
-backend could not be used. 'nagios' uses the Nagios codes 0 to 3 instead.
+backend could not be used.
 """
 
 from __future__ import annotations
@@ -45,7 +41,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -562,7 +557,7 @@ def cmd_dashboard(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]
     return 0
 
 
-def _valid(site_root: Path, doc: dict[str, Any]) -> tuple[dict[str, Any], Findings]:
+def valid_slos(site_root: Path, doc: dict[str, Any]) -> tuple[dict[str, Any], Findings]:
     settings = doc.get("slo") or {}
     if not settings:
         raise SiteError("site.yaml has no slo section")
@@ -572,7 +567,7 @@ def _valid(site_root: Path, doc: dict[str, Any]) -> tuple[dict[str, Any], Findin
     return settings, found
 
 
-def _selected(args: argparse.Namespace, found: Findings) -> list[Slo]:
+def selected_slos(args: argparse.Namespace, found: Findings) -> list[Slo]:
     return [
         slo
         for slo in found.slos
@@ -582,38 +577,12 @@ def _selected(args: argparse.Namespace, found: Findings) -> list[Slo]:
 
 
 def cmd_status(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
-    settings, found = _valid(site_root, doc)
+    settings, found = valid_slos(site_root, doc)
     print(
-        json.dumps({"slos": status(settings, _selected(args, found), read_token(settings), found.journeys)}, indent=2)
+        json.dumps(
+            {"slos": status(settings, selected_slos(args, found), read_token(settings), found.journeys)}, indent=2
+        )
     )
-    return 0
-
-
-def cmd_nagios(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
-    """A Nagios check. Any failure is UNKNOWN (3), never the CRITICAL that exit 2 would mean."""
-    import budget  # noqa: PLC0415  pylint: disable=import-outside-toplevel
-
-    try:
-        settings, found = _valid(site_root, doc)
-        code, line = budget.nagios(status(settings, _selected(args, found), read_token(settings), found.journeys))
-    except SiteError as exc:
-        code, line = budget.NAGIOS_CODES["UNKNOWN"], budget.ascii_text(f"SLO UNKNOWN - {exc}")
-    print(line)
-    return code
-
-
-def cmd_snapshot(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
-    import budget  # noqa: PLC0415  pylint: disable=import-outside-toplevel
-
-    settings, found = _valid(site_root, doc)
-    history = Path(args.out)
-    if not history.is_dir():
-        raise SiteError(f"history directory {history} does not exist")
-    today = date.fromisoformat(args.today) if args.today else None
-    result = budget.snapshot(
-        history, settings, found, read_token(settings), timezone=doc["incident"]["timezone"], today=today
-    )
-    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -632,14 +601,6 @@ def build_parser() -> argparse.ArgumentParser:
     stat.add_argument("--service", help="only this service (name or component:<name>)")
     stat.add_argument("--slo", help="only this SLO")
     stat.set_defaults(run=cmd_status)
-    check = sub.add_parser("nagios", help="a Nagios check: budget state as an exit code and one line")
-    check.add_argument("--service", help="only this service (name or component:<name>)")
-    check.add_argument("--slo", help="only this SLO")
-    check.set_defaults(run=cmd_nagios)
-    snap = sub.add_parser("snapshot", help="write daily budget snapshots, filling any missing day inside retention")
-    snap.add_argument("--out", required=True, help="history directory, one YYYY-MM.jsonl file per month")
-    snap.add_argument("--today", help="local date to treat as today (YYYY-MM-DD); for tests and reruns")
-    snap.set_defaults(run=cmd_snapshot)
     return parser
 
 

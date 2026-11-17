@@ -1,7 +1,7 @@
 ---
 name: start-incident
 description: This skill should be used when the user says "start an incident", "we have an incident", "incident on <host or service>", "something's down", "run an incident drill", reports a live production problem, or asks for a handover or summary of an incident in progress. Takes a free-text description of the problem and drives triage, diagnosis and gated recovery, keeping a typed timeline that the create-pir skill consumes once the incident is resolved.
-version: 0.6.0
+version: 0.7.0
 ---
 
 # Start Incident
@@ -46,11 +46,14 @@ A runbook's recovery step is still a mutation. A drill never mutates anything.
 
    Exit 3 means incidents are already open and lists them: attach to the right one (`incident.py attach <id>`) rather than opening a duplicate, or pass `--new` if this is separate. For a practice run add `--drill`. Record the first symptom as a `discovery` entry.
 
-2. **Establish the picture.** Follow the site's `triage` procedures to query monitoring, then answer: what is affected, since when, how badly. Use the catalog (`references/catalog-in-an-incident.md`) to turn a failing host or check into the services it belongs to, their tier, and what depends on them. If the site has SLOs, read the affected services' budget state (`uv run <plugin root>/scripts/slo.py status --service component:<name>`): a journey burning fast or exhausted is evidence of user impact, and its attainment is a fact for the record. Set a **provisional** severity from the site's criteria (`incident.severity_criteria`) and update the body:
+2. **Establish the picture.** Follow the site's `triage` procedures to query monitoring, then answer: what is affected, since when, how badly. Use the catalog (`references/catalog-in-an-incident.md`) to turn a failing host or check into the services it belongs to, their tier, and what depends on them. If the site has SLOs, read the affected services' budget state (`uv run <plugin root>/scripts/slo.py status --service component:<name>`): a journey burning fast or exhausted is evidence of user impact, and its attainment is a fact for the record. Set a **provisional** severity from the site's criteria (`incident.severity_criteria`) and update the body, naming the affected catalog services in `--services` (the monthly reliability report counts the incident against exactly these):
 
    ```bash
-   uv run <plugin root>/scripts/incident.py set --severity P2 --phase Diagnosing --affected "…" --impact "…"
+   uv run <plugin root>/scripts/incident.py set --severity P2 --phase Diagnosing --affected "…" --impact "…" \
+     --services <service>,<service>
    ```
+
+   If `slo.py status` shows `"frozen": true`, the services in its `freeze_scope` are frozen: their error budget is spent. Say so in the first update.
 
    If the site's `evidence` procedures say some evidence expires, capture it now.
 
@@ -58,13 +61,15 @@ A runbook's recovery step is still a mutation. A drill never mutates anything.
 
 4. **Diagnose and act.** Tier 0 freely. For any mutation, ask `autonomy.py match` first: a Tier 2 action is run by `autonomy.py run`, without asking; Tier 1 only after confirmation, with the approval recorded in the audit log before the command runs. Record every action **and its observed effect** as an `action` entry: what was changed, who approved it, what happened next. Record findings as `discovery`, choices between options as `decision`.
 
-5. **Verify recovery.** Confirm through the same source that first showed the problem. Capture after-the-fix evidence if the site procedures call for it. Then:
+   **A frozen service.** Before asking for a Tier 1 mutation on a service that is frozen, put the freeze in the blast-radius statement ("ingress is frozen: its error budget is exhausted"). If the change is not itself the fix, it needs the owner's exception as well as their approval: record the exception, with its reason, as a `decision` entry before acting. `autonomy.py` already keeps a frozen service's pre-approved actions at Tier 1, and says why.
+
+5. **Verify recovery.** Confirm through the same source that first showed the problem. Capture after-the-fix evidence if the site procedures call for it. Confirm `--services` names every service that was affected, now that it is known. Then:
 
    ```bash
    uv run <plugin root>/scripts/incident.py close
    ```
 
-   This marks the incident resolved. The tracking issue stays open: closing it is a person's decision after review.
+   This marks the incident resolved and records when. The tracking issue stays open: closing it is a person's decision after review.
 
 6. **Hand off.** Post a `summary` entry, then point the user at the `create-pir` skill. The audit log is committed at the end of the review, not now.
 

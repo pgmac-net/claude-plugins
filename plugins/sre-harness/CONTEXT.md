@@ -100,6 +100,26 @@ _Avoid_: Freeze policy
 Where an SLO's error budget stands now: healthy, burning fast (spending faster than the window allows), exhausted (none left), or unknown (no data).
 _Avoid_: Health, status colour
 
+**Freeze scope**:
+The services an SLO's exhausted budget freezes: its journey's service, plus those the journey lists in `suspends`.
+_Avoid_: Blast radius, dependency set
+
+**Freeze**:
+The state of a service in an exhausted budget's freeze scope: risky change waits for the owner's recorded exception, and its pre-approved actions are held at Tier 1.
+_Avoid_: Lock, change freeze window
+
+**Budget suspension**:
+A pre-approved action held at Tier 1 because an error budget governing its service is exhausted, unknown or unreadable. Decided live, recorded in the audit log.
+_Avoid_: Disabled action, Tier 2 off
+
+**Snapshot**:
+One line recording an SLO's day: attainment, lowest budget, highest burn, worst state and minutes measured. Kept outside the metrics backend, which forgets.
+_Avoid_: Sample, export, backup
+
+**Reliability report**:
+The monthly report of attainment, budget and incidents for every service whose tier requires an SLA report. Merging it is the owner's acceptance.
+_Avoid_: SLA report (the commitment is the SLA; this is its evidence), dashboard
+
 **Canary**:
 A minimal backend that exists only to be probed, so a probe's failure means the path to it failed, not an application.
 _Avoid_: Test app, dummy service

@@ -1,3 +1,8 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["jsonschema>=4.21", "pyyaml>=6"]
+# ///
 """Error-budget enforcement and history: the Tier 2 gate, the Nagios check and daily snapshots.
 
 Everything here reads budget state the same way `slo.py status` does, from the
@@ -12,11 +17,23 @@ recorded series, so the alert, the gate and the report can never disagree.
 - A snapshot is one JSON line per SLO per day, written to a history
   directory. Each run also fills any missing day still inside the backend's
   retention, so a missed run repairs itself.
+
+Commands:
+  nagios    a Nagios check: OK healthy, WARNING burning fast, CRITICAL
+            exhausted (the text names the freeze), UNKNOWN no data or the
+            backend could not be read
+  snapshot  write one line per SLO per day to a history directory, filling
+            any missing day still inside the backend's retention
+
+Exit codes: nagios uses the Nagios codes 0 to 3 and never 2 for its own
+failures. snapshot: 0 ok, 2 the site or the backend could not be used.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
+import sys
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -24,7 +41,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import slo
-from sre_common import SiteError, iso_utc, utc_now
+from sre_common import SiteError, guarded, iso_utc, load_site, utc_now
 
 # --- the Tier 2 gate -----------------------------------------------------------
 
@@ -45,38 +62,38 @@ class BudgetGate:
         self.site_root = site_root
         self.doc = doc
         self.token_reader = token_reader or slo.read_token
-        self._loaded = False
         self._invalid: str | None = None
-        self._scopes: list[tuple[slo.Slo, list[str]]] = []
+        # None until loaded: each budgeted SLO and the services it can freeze.
+        self._scopes: list[tuple[slo.Slo, list[str]]] | None = None
         self._states: dict[str, dict[str, Any]] | None = None
         self._read_error: str | None = None
 
-    def _load(self) -> None:
-        if self._loaded:
-            return
-        self._loaded = True
+    def _load(self) -> list[tuple[slo.Slo, list[str]]]:
+        if self._scopes is not None:
+            return self._scopes
+        self._scopes = []
         if not self.doc.get("slo"):
-            return
+            return self._scopes
         found = slo.load(self.site_root, self.doc)
         if found.errors:
             self._invalid = (
                 f"the site's journeys or SLOs are not valid ({len(found.errors)} problem(s)), "
                 "so no error budget can be trusted; run slo.py check"
             )
-            return
+            return self._scopes
         self._scopes = [(one, slo.freeze_scope(one, found.journeys)) for one in found.slos if one.budget]
+        return self._scopes
 
     def governed(self) -> set[str]:
         """Services some budgeted SLO can freeze."""
-        self._load()
-        return {ref for _one, scope in self._scopes for ref in scope}
+        return {ref for _one, scope in self._load() for ref in scope}
 
     def _read_states(self) -> None:
         if self._states is not None or self._read_error is not None:
             return
         settings = self.doc["slo"]
         try:
-            results = slo.status(settings, [one for one, _scope in self._scopes], self.token_reader(settings))
+            results = slo.status(settings, [one for one, _scope in self._load()], self.token_reader(settings))
         except SiteError as exc:
             self._read_error = str(exc)
             return
@@ -84,10 +101,10 @@ class BudgetGate:
 
     def reason(self, service: str) -> str | None:
         """Why the error budget keeps this service at Tier 1, or None if it does not."""
-        self._load()
+        scopes = self._load()
         if self._invalid:
             return self._invalid
-        governing = [one for one, scope in self._scopes if service in scope]
+        governing = [one for one, scope in scopes if service in scope]
         if not governing:
             return None
         self._read_states()
@@ -196,6 +213,8 @@ def _day_values(
         "error_1d": f'slo:sli_error:ratio_rate1d{{slo=~"{match}"}}',
         "remaining": f'slo:error_budget:remaining_ratio{{slo=~"{match}"}}',
         "remaining_min": f'min_over_time(slo:error_budget:remaining_ratio{{slo=~"{match}"}}[{span}])',
+        # The rules are evaluated every minute, so this is the minutes of the day that were measured.
+        "minutes": f'count_over_time(slo:sli_error:ratio_rate{slo.BASE_WINDOW}{{slo=~"{match}"}}[{span}])',
         **{
             f"burn_max_{w}": f'max_over_time(slo:sli_error:ratio_rate{w}{{slo=~"{match}"}}[{span}])'
             for w in slo.FAST_BURN
@@ -235,6 +254,7 @@ def snapshot_row(one: slo.Slo, scope: list[str], day: date, values: dict[str, fl
         "window": one.window,
         "spends_budget": one.budget,
         "error_ratio_1d": round(error, 6),
+        "data_minutes": int(values.get("minutes", 0)),
         "attainment_1d": round(1 - error, 6),
         "budget_remaining": round(values["remaining"], 4) if "remaining" in values else None,
         "budget_remaining_min": round(values["remaining_min"], 4) if "remaining_min" in values else None,
@@ -313,3 +333,57 @@ def read_history_file(path: Path) -> list[dict[str, Any]]:
         if isinstance(row, dict) and "date" in row and "slo" in row:
             rows.append(row)
     return rows
+
+
+# --- commands ----------------------------------------------------------------------
+
+
+def cmd_nagios(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
+    """A Nagios check. Any failure is UNKNOWN (3), never the CRITICAL that exit 2 would mean."""
+    try:
+        settings, found = slo.valid_slos(site_root, doc)
+        code, line = nagios(
+            slo.status(settings, slo.selected_slos(args, found), slo.read_token(settings), found.journeys)
+        )
+    except SiteError as exc:
+        code, line = NAGIOS_CODES["UNKNOWN"], ascii_text(f"SLO UNKNOWN - {exc}")
+    print(line)
+    return code
+
+
+def cmd_snapshot(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
+    settings, found = slo.valid_slos(site_root, doc)
+    history = Path(args.out)
+    if not history.is_dir():
+        raise SiteError(f"history directory {history} does not exist")
+    today = date.fromisoformat(args.today) if args.today else None
+    result = snapshot(
+        history, settings, found, slo.read_token(settings), timezone=doc["incident"]["timezone"], today=today
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--site", help="site repository path")
+    sub = parser.add_subparsers(dest="command", required=True)
+    check = sub.add_parser("nagios", help="a Nagios check: budget state as an exit code and one line")
+    check.add_argument("--service", help="only this service (name or component:<name>)")
+    check.add_argument("--slo", help="only this SLO")
+    check.set_defaults(run=cmd_nagios)
+    snap = sub.add_parser("snapshot", help="write daily budget snapshots, filling any missing day inside retention")
+    snap.add_argument("--out", required=True, help="history directory, one YYYY-MM.jsonl file per month")
+    snap.add_argument("--today", help="local date to treat as today (YYYY-MM-DD); for tests and reruns")
+    snap.set_defaults(run=cmd_snapshot)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Command-line entry point."""
+    args = build_parser().parse_args(argv)
+    return guarded(lambda: args.run(args, *load_site(args.site)))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
