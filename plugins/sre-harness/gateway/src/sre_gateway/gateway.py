@@ -40,6 +40,7 @@ log = logging.getLogger(__name__)
 
 CHUNK = 3500
 ARCHIVE_CHECK_SECONDS = 3600
+ARCHIVE_FIRST_SECONDS = 60
 MAX_TRACKED_CALLS = 200
 STATUS_WORDS = frozenset({"status", "!status"})
 TRIAGE, CHAT = "triage-only", "chat"
@@ -268,8 +269,11 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
     # --- unattended triage ---------------------------------------------------------
 
     def _open_sessions(self, drill: bool) -> list[Session]:
-        """Conversations still being worked, real or drill; a resolved-and-archived one is gone."""
-        return [s for s in self.sessions.values() if not s.conv.archived and s.conv.drill == drill]
+        """Conversations whose incident is still being worked, real or drill.
+
+        One the agent has closed or dismissed is not, even while its channel waits for the archive sweep.
+        """
+        return [s for s in self.sessions.values() if not s.conv.archived and not s.conv.ended and s.conv.drill == drill]
 
     async def on_alerts(self, alerts: list[Alert]) -> None:
         """New qualifying problems from one poll: into an open incident, else one new triage, else a notice."""
@@ -283,10 +287,8 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             await self._say(session.place, "New alerts while this incident is open:\n" + "\n".join(lines))
             await session.queue.put(prompts.alert_in_incident(lines))
         else:
-            live_auto = [s for s in self.sessions.values() if s.conv.auto and not s.conv.archived]
-            if len(live_auto) >= self.runner.settings.max_auto_sessions:
-                await self._announce("Triage capacity is full; not starting one for:\n" + "\n".join(lines))
-                return
+            # Only one unattended triage is ever being worked: while one is open, alerts join it (above).
+            # Drills and incidents already closed or dismissed take no part in that choice.
             await self._start_triage(alerts, drill=False)
         self.runner.mark(alerts)
 
@@ -496,9 +498,16 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
                         f"Unattended triage {before} promoted to incident {state['id']}: {state.get('url')}"
                     )
         elif kind == "close" and session.conv.incident:
+            self._end(session)
             await self._announce(f"{self._label(session)} {session.conv.incident} resolved: {session.conv.title}")
         elif kind == "dismiss" and session.conv.incident:
+            self._end(session)
             await self._announce(f"Unattended triage {session.conv.incident} dismissed: not an incident.")
+
+    def _end(self, session: Session) -> None:
+        """The incident is resolved or dismissed: it takes no more alerts and no triage slot."""
+        session.conv.ended = True
+        self._save()
 
     async def _ask(self, session: Session, tool: str, tool_input: dict[str, Any], tool_use_id: str) -> PermissionAnswer:
         if session.conv.policy == TRIAGE:
@@ -605,9 +614,12 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             await self.chat.post(Place(self.settings.hub), text if raw else self._scrub(text), raw=raw)
 
     async def _archive_loop(self) -> None:
+        # Soon after start, not an hour after: an incident closed while the gateway was down still holds
+        # its conversation open until the first sweep.
+        await asyncio.sleep(ARCHIVE_FIRST_SECONDS)
         while True:
-            await asyncio.sleep(ARCHIVE_CHECK_SECONDS)
             await self.archive_closed()
+            await asyncio.sleep(ARCHIVE_CHECK_SECONDS)
 
     async def archive_closed(self) -> None:
         """Archive the channel of each incident whose tracking issue a person has closed."""

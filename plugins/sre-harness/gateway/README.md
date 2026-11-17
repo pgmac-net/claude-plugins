@@ -36,7 +36,7 @@ With a `runner` section in `site.yaml` and `enabled: true`, the gateway also sta
 
 **Limits.**
 - While a real incident's conversation is open, new problems are posted into it instead of starting another.
-- At most `max_auto_sessions` alert-started sessions run at once. Over that, the hub is told and nothing starts.
+- Only one unattended triage is worked at a time, because new alerts join the open one. Drills, and incidents already closed or dismissed, do not count. A closed incident's channel is archived within a minute of a restart, then hourly.
 - After a triage, a service waits `cooldown_minutes` before it can start another.
 - If the source can't be read, the hub is told once, and again when it recovers.
 
@@ -110,7 +110,7 @@ Upgrade by moving the plugin checkout to a new tag or commit, running `uv sync -
 | Shared usage limits | Limit hits are posted; sessions are capped | Incidents compete with interactive use of the same subscription |
 | An unattended triage changes something | Triage-only rules deny record changes and pre-approved actions; every other call is refused without asking and logged | Claude Code's own read-only commands still run, as in every session |
 | Alert text instructs the agent | The agent is told alert output is evidence; the triage-only policy bounds what any instruction could do | A misled triage can propose a bad fix; a person approves every change |
-| An alert storm floods chat or spends the usage window | One triage per poll; alerts join an open incident; `max_auto_sessions`; per-service cooldown | Each poll that finds new problems with no incident open can still start one triage |
+| An alert storm floods chat or spends the usage window | One triage per poll; alerts join an open incident; per-service cooldown | Each poll that finds new problems with no incident open can still start one triage |
 | Unreviewed text on a public tracker | Triage records open in a private repository; only a responder's `promote` makes one public, carrying conclusions, not evidence | — |
 
 ## Development
