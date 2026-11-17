@@ -41,6 +41,8 @@ log = logging.getLogger(__name__)
 CHUNK = 3500
 ARCHIVE_CHECK_SECONDS = 3600
 ARCHIVE_FIRST_SECONDS = 60
+START_ATTEMPTS = 3
+START_RETRY_SECONDS = 30
 MAX_TRACKED_CALLS = 200
 STATUS_WORDS = frozenset({"status", "!status"})
 TRIAGE, CHAT = "triage-only", "chat"
@@ -79,6 +81,8 @@ class Session:
     calls: dict[str, ToolCall] = field(default_factory=dict)
     worker: asyncio.Task | None = None
     release_after_turn: bool = False
+    # Messages kept while the agent could not start; they go to it ahead of the next one.
+    held: list[str] = field(default_factory=list)
 
     @property
     def place(self) -> Place:
@@ -411,12 +415,33 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             if message is None:
                 await self._park(session)
                 return
-            if not await self._ensure_driver(session):
+            if not await self._start_with_retries(session):
+                # Kept, not dropped: an alert's first message is the only time the agent hears of it.
+                session.held.append(message)
                 continue
+            if session.held:
+                message = "\n\n".join([*session.held, message])
+                session.held.clear()
             await self._turn(session, message)
             if session.release_after_turn:
                 session.release_after_turn = False
                 await self._park(session)
+
+    async def _start_with_retries(self, session: Session) -> bool:
+        """Start the agent, trying again after a pause: a start can fail on a passing network or DNS fault."""
+        for attempt in range(1, START_ATTEMPTS + 1):
+            if await self._ensure_driver(session):
+                return True
+            if attempt < START_ATTEMPTS:
+                wait = START_RETRY_SECONDS * attempt
+                await self.chat.post(session.place, f"Trying again in {wait} seconds ({attempt} of {START_ATTEMPTS}).")
+                await asyncio.sleep(wait)
+        await self.chat.post(
+            session.place,
+            f"The agent did not start after {START_ATTEMPTS} tries. Its message is kept: "
+            "send any message here and it goes to the agent first.",
+        )
+        return False
 
     async def _ensure_driver(self, session: Session) -> bool:
         if session.driver is not None:

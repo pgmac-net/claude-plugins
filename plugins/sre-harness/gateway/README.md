@@ -23,7 +23,7 @@ Design: [ADR 0008](../docs/adr/0008-chat-ops-with-identity-bound-approvals.md) a
    Only a listed approver can answer, checked against the user ID in each click. The request is single-use and expires (default 5 minutes). The decision is written to the audit log **before** the agent is answered; if it can't be written, the call is refused. No request can be made before the incident record exists.
 5. **Resolve and archive.** When the agent runs `incident.py close`, the hub hears about it. Once a person closes the tracking issue, the channel is archived. The gateway checks hourly. The issue stays the record, which matters because Slack's free plan keeps 90 days.
 
-**Sessions.** One resumable session per incident. A session stops after `idle_stop_minutes` and resumes by its ID on the next message. At most `max_sessions` run at once; others wait, and say so. The conversation-to-session mapping survives restarts (`~/.local/state/sre-harness/gateway/conversations.json`, mode 0600). Usage limits, crashes and restarts are posted in the channel.
+**Sessions.** One resumable session per incident. A session stops after `idle_stop_minutes` and resumes by its ID on the next message. At most `max_sessions` run at once; others wait, and say so. The conversation-to-session mapping survives restarts (`~/.local/state/sre-harness/gateway/conversations.json`, mode 0600). Usage limits, crashes and restarts are posted in the channel. If the agent fails to start, the gateway tries 3 times, 30s then 60s apart. After that, the message is kept and goes to the agent ahead of the next one, so an alert is never lost to a failed start.
 
 ## Unattended triage
 
