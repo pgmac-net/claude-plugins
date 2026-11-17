@@ -13,7 +13,7 @@ Commands:
   open     create the tracking issue (refuses if open incidents exist, unless --new)
   attach   adopt an existing tracking issue as the current incident
   status   show the current incident
-  set      change severity, phase, affected scope, impact or runbook in the issue body
+  set      change severity, phase, affected scope, services, impact or runbook in the issue body
   close    mark the incident resolved locally and in the body; the issue stays open
   gc       clear local state of incidents whose audit log has merged (dry run unless --apply)
 
@@ -28,6 +28,7 @@ import json
 import re
 import secrets
 import sys
+from pathlib import Path
 from typing import Any
 
 import sre_common
@@ -37,7 +38,10 @@ from sre_common import SEVERITIES, SiteError, guarded, iso_utc, load_site, local
 MARKER = "<!-- sre-harness:incident v1 -->"
 PHASES = ("Establishing picture", "Diagnosing", "Mitigating", "Verifying", "Resolved")
 LABEL_COLOUR = "b60205"
-FIELDS = {"severity": "Severity", "phase": "Phase", "affected": "Affected"}
+FIELDS = {"severity": "Severity", "phase": "Phase", "affected": "Affected", "services": "Services"}
+# Lines added after the first release of the body format, and the line each goes after when missing.
+LATER_FIELDS = {"Services": "Affected", "Resolved": "Services"}
+NOT_KNOWN = "not yet known"
 SECTIONS = {"impact": "Impact", "runbook": "Runbook"}
 
 BODY = """{marker}
@@ -47,6 +51,7 @@ BODY = """{marker}
 **Severity:** {severity} (provisional)
 **Phase:** {phase}
 **Affected:** {affected}
+**Services:** {services}
 
 ## Impact
 
@@ -93,12 +98,63 @@ def ensure_label(repo: str, label: str, drill: bool) -> None:
             raise
 
 
+def _field_pattern(name: str) -> re.Pattern[str]:
+    return re.compile(rf"^\*\*{re.escape(name)}:\*\* .*$", re.MULTILINE)
+
+
 def set_field(body: str, name: str, value: str) -> str:
-    """Replace one '**Name:** value' line in the issue body."""
-    pattern = re.compile(rf"^\*\*{re.escape(name)}:\*\* .*$", re.MULTILINE)
+    """Replace one '**Name:** value' line in the issue body.
+
+    A line added to the format later is inserted when an older body lacks it.
+    """
+    pattern = _field_pattern(name)
     if not pattern.search(body):
-        raise SiteError(f"issue body has no '**{name}:**' line; it was not opened by incident.py")
+        if name not in LATER_FIELDS:
+            raise SiteError(f"issue body has no '**{name}:**' line; it was not opened by incident.py")
+        anchor = LATER_FIELDS[name]
+        if not _field_pattern(anchor).search(body):
+            body = set_field(body, anchor, NOT_KNOWN)
+        return _field_pattern(anchor).sub(lambda match: f"{match.group(0)}\n**{name}:** {value}", body, count=1)
     return pattern.sub(lambda _match: f"**{name}:** {value}", body, count=1)
+
+
+def read_field(body: str, name: str) -> str | None:
+    """The value of one '**Name:** value' line, or None."""
+    found = _field_pattern(name).search(body or "")
+    return found.group(0).split(":** ", 1)[1].strip() if found else None
+
+
+def known_services(site_root: Path, doc: dict[str, Any]) -> set[str]:
+    """Component refs in the site's catalog."""
+    import catalog_check  # noqa: PLC0415  pylint: disable=import-outside-toplevel
+
+    report = catalog_check.CatalogReport()
+    entities = catalog_check.load_entities(site_root / doc["catalog"]["path"], report)
+    return {entity.ref for entity in entities if entity.doc["kind"] == "Component"}
+
+
+def services_value(text: str, known: set[str]) -> str:
+    """Normalise '--services a,component:b' to 'component:a, component:b', refusing names not in the catalog."""
+    refs = []
+    for part in (item.strip() for item in text.split(",")):
+        if not part:
+            continue
+        ref = part if part.startswith("component:") else f"component:{part}"
+        if ref not in known:
+            raise SiteError(f"{ref} is not a service in the catalog; services are catalog Components")
+        if ref not in refs:
+            refs.append(ref)
+    if not refs:
+        raise SiteError("--services needs at least one catalog service")
+    return ", ".join(refs)
+
+
+def parse_services(body: str) -> list[str]:
+    """Component refs from a body's '**Services:**' line; empty when absent or not yet known."""
+    value = read_field(body, "Services")
+    if not value or value == NOT_KNOWN:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip().startswith("component:")]
 
 
 def set_section(body: str, heading: str, text: str) -> str:
@@ -147,7 +203,8 @@ def cmd_open(args: argparse.Namespace, doc: dict[str, Any]) -> int:
         utc=iso_utc(now),
         severity=args.severity,
         phase=PHASES[0],
-        affected=args.affected or "not yet known",
+        affected=args.affected or NOT_KNOWN,
+        services=services_value(args.services, known_services(args.site_root, doc)) if args.services else NOT_KNOWN,
         impact=args.impact or "Not yet known.",
     )
     ensure_label(repo, label, args.drill)
@@ -217,27 +274,36 @@ def apply_changes(state: dict[str, Any], changes: dict[str, str], final: bool = 
             body = set_field(body, "Severity", f"{value} ({'final' if final else 'provisional'})")
         elif key in FIELDS:
             body = set_field(body, FIELDS[key], value)
+        elif key == "resolved":
+            body = set_field(body, "Resolved", value)
         else:
             body = set_section(body, SECTIONS[key], value)
     sre_common.run_gh(["issue", "edit", str(state["number"]), "--repo", state["repo"], "--body-file", "-"], stdin=body)
     state.update({key: changes[key] for key in ("severity", "phase") if key in changes})
 
 
-def cmd_set(args: argparse.Namespace, _doc: dict[str, Any]) -> int:
+def cmd_set(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     state = sre_common.read_incident_state(args.incident)
     changes = {key: getattr(args, key) for key in (*FIELDS, *SECTIONS) if getattr(args, key) is not None}
     if not changes:
-        raise SiteError("nothing to change; pass at least one of --severity, --phase, --affected, --impact, --runbook")
+        raise SiteError(
+            "nothing to change; pass at least one of --severity, --phase, --affected, --services, --impact, --runbook"
+        )
+    if "services" in changes:
+        changes["services"] = services_value(changes["services"], known_services(args.site_root, doc))
     apply_changes(state, changes, args.final)
     sre_common.write_incident_state(state, make_current=False)
     print(f"{state['id']}: updated {', '.join(changes)}")
     return 0
 
 
-def cmd_close(args: argparse.Namespace, _doc: dict[str, Any]) -> int:
+def cmd_close(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     state = sre_common.read_incident_state(args.incident)
-    apply_changes(state, {"phase": "Resolved"})
-    state.update({"status": "resolved", "resolved_at": iso_utc(utc_now())})
+    now = utc_now()
+    apply_changes(
+        state, {"phase": "Resolved", "resolved": f"{local_clock(now, doc['incident']['timezone'])} ({iso_utc(now)})"}
+    )
+    state.update({"status": "resolved", "resolved_at": iso_utc(now)})
     sre_common.write_incident_state(state, make_current=False)
     print(f"{state['id']}: resolved. The tracking issue stays open until a person closes it.")
     print("The audit hook is still capturing. When the review is written, run: audit.py commit")
@@ -266,6 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
     opener.add_argument("--title", required=True)
     opener.add_argument("--severity", choices=SEVERITIES, required=True, help="provisional severity")
     opener.add_argument("--affected", help="hosts or services affected, as far as known")
+    opener.add_argument("--services", help="catalog services affected, comma-separated (name or component:<name>)")
     opener.add_argument("--impact", help="what is broken, for whom")
     opener.add_argument("--drill", action="store_true", help="practice incident, tracked in the drill repository")
     opener.add_argument("--new", action="store_true", help="open even though other incidents are open")
@@ -285,6 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
     setter.add_argument("--final", action="store_true", help="mark the severity final rather than provisional")
     setter.add_argument("--phase", choices=PHASES)
     setter.add_argument("--affected")
+    setter.add_argument("--services", help="catalog services affected, comma-separated; replaces the list")
     setter.add_argument("--impact")
     setter.add_argument("--runbook")
     setter.set_defaults(run=cmd_set)

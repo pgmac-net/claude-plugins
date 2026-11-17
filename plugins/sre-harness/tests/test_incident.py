@@ -130,6 +130,41 @@ def test_set_with_nothing_to_change_fails(capsys):
     assert "nothing to change" in capsys.readouterr().err
 
 
+def test_services_are_catalog_refs_set_at_open_and_replaced_by_set(gh):
+    assert open_one(["--services", "example-service"]) == 0
+    assert "**Services:** component:example-service\n" in gh.body
+    assert incident.main(["set", "--services", "component:example-service, example-service"]) == 0
+    assert gh.body.count("**Services:**") == 1
+    assert incident.parse_services(gh.body) == ["component:example-service"]
+
+
+def test_unknown_service_is_refused(gh, capsys):
+    open_one()
+    assert incident.main(["set", "--services", "no-such-thing"]) == 2
+    assert "component:no-such-thing is not a service in the catalog" in capsys.readouterr().err
+    assert "**Services:** not yet known" in gh.body
+
+
+def test_older_body_gains_the_services_line_after_affected(gh):
+    open_one()
+    gh.body = gh.body.replace("**Services:** not yet known\n", "")
+    assert incident.main(["set", "--services", "example-service"]) == 0
+    assert "**Affected:** not yet known\n**Services:** component:example-service\n" in gh.body
+
+
+def test_services_not_yet_known_parse_as_none():
+    assert incident.parse_services("**Services:** not yet known\n") == []
+    assert incident.parse_services("no such line") == []
+
+
+def test_close_records_when_it_was_resolved(gh):
+    open_one()
+    assert incident.main(["close"]) == 0
+    resolved = incident.read_field(gh.body, "Resolved")
+    assert resolved and resolved.endswith("Z)")
+    assert "**Services:** not yet known\n**Resolved:** " in gh.body
+
+
 def test_close_resolves_but_leaves_the_issue_open(gh):
     open_one()
     assert incident.main(["close"]) == 0
@@ -140,7 +175,14 @@ def test_close_resolves_but_leaves_the_issue_open(gh):
 
 def test_attach_adopts_an_existing_issue(gh):
     gh.body = incident.BODY.format(
-        marker=incident.MARKER, clock="x", utc="y", severity="P3", phase="Diagnosing", affected="a", impact="b"
+        marker=incident.MARKER,
+        clock="x",
+        utc="y",
+        severity="P3",
+        phase="Diagnosing",
+        affected="a",
+        services="c",
+        impact="b",
     )
     assert incident.main(["attach", "incidents-9"]) == 0
     state = sre_common.read_incident_state()

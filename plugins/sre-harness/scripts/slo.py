@@ -15,7 +15,11 @@ Commands:
   generate  write the recording rules (--check: fail if the file is stale)
   dashboard write a Grafana dashboard for every SLO, reading the recorded series
             (--check: fail if the file is stale)
-  status    attainment, budget remaining and budget state for each SLO
+  status    attainment, budget remaining, budget state and freeze for each SLO
+  nagios    the same as a Nagios check: OK, WARNING burning fast, CRITICAL
+            exhausted, UNKNOWN no data or the backend could not be read
+  snapshot  append one line per SLO per day to a history directory, filling
+            any missing day still inside the backend's retention
 
 Budget maths, all in recording rules so every reader gets the same numbers:
   error ratio over 5 minutes, then its average over 1h, 6h, 1d and the SLO's
@@ -25,7 +29,7 @@ Budget maths, all in recording rules so every reader gets the same numbers:
   errors.
 
 Exit codes: 0 ok, 1 check failed or rules are stale, 2 the site or the
-backend could not be used.
+backend could not be used. 'nagios' uses the Nagios codes 0 to 3 instead.
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -163,7 +168,11 @@ def _load_journey(path: Path, site_root: Path, known_refs: set[str] | None, foun
     if not (path.parent / meta["error_budget_policy"]).is_file():
         found.errors.append(f"{rel}: error_budget_policy {meta['error_budget_policy']} does not exist beside it")
     if known_refs is not None:
-        refs = [meta["service"], *(ref for step in meta["steps"] for ref in step.get("depends_on", []))]
+        refs = [
+            meta["service"],
+            *(ref for step in meta["steps"] for ref in step.get("depends_on", [])),
+            *meta.get("suspends", []),
+        ]
         found.errors.extend(f"{rel}: {ref} is not in the catalog" for ref in refs if ref not in known_refs)
     found.journeys.append(Journey(name=path.stem, service=meta["service"], meta=meta, path=rel))
 
@@ -354,9 +363,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
-def query(settings: dict[str, Any], promql: str, token: str) -> list[dict[str, Any]]:
-    """An instant query against the backend. Raises SiteError with the backend's message, never the token."""
-    url = settings["url"].rstrip("/") + "/api/v1/query?" + urllib.parse.urlencode({"query": promql})
+def query(settings: dict[str, Any], promql: str, token: str, at: float | None = None) -> list[dict[str, Any]]:
+    """An instant query against the backend, now or at a Unix time.
+
+    Raises SiteError with the backend's message, never the token.
+    """
+    params: dict[str, str] = {"query": promql}
+    if at is not None:
+        params["time"] = f"{at:.0f}"
+    url = settings["url"].rstrip("/") + "/api/v1/query?" + urllib.parse.urlencode(params)
     request = urllib.request.Request(url)  # noqa: S310 - the URL is site configuration, https or localhost only
     if settings.get("user"):
         pair = base64.b64encode(f"{settings['user']}:{token}".encode()).decode()
@@ -414,7 +429,23 @@ def assess(slo: Slo, values: dict[str, float]) -> dict[str, Any]:
     return {**result, "state": state}
 
 
-def status(settings: dict[str, Any], slos: list[Slo], token: str) -> list[dict[str, Any]]:
+def freeze_scope(slo: Slo, journeys: list[Journey]) -> list[str]:
+    """Services frozen, with Tier 2 off, while this SLO's budget is exhausted: its own, then its journey's suspends."""
+    own = f"component:{slo.service}"
+    extra = next((j.meta.get("suspends", []) for j in journeys if j.service == own and j.name == slo.journey), [])
+    return [own, *(ref for ref in extra if ref != own)]
+
+
+def with_freeze(result: dict[str, Any], scope: list[str]) -> dict[str, Any]:
+    """Add the freeze to one SLO's status. Only a budgeted SLO can freeze anything."""
+    if not result["spends_budget"]:
+        return result
+    return {**result, "frozen": result["state"] == "exhausted", "freeze_scope": scope}
+
+
+def status(
+    settings: dict[str, Any], slos: list[Slo], token: str, journeys: list[Journey] | None = None
+) -> list[dict[str, Any]]:
     """One query for all SLOs; then the maths above, per SLO."""
     # SLO names are [a-z0-9-] by schema, so they need no regex escaping. Python's re.escape
     # would turn '-' into '\-', an invalid escape inside a PromQL string literal (HTTP 400).
@@ -429,7 +460,8 @@ def status(settings: dict[str, Any], slos: list[Slo], token: str) -> list[dict[s
             values.setdefault(metric["slo"], {})[metric["__name__"]] = float(row["value"][1])
         except (KeyError, ValueError, IndexError):
             continue
-    return [assess(slo, values.get(slo.name, {})) for slo in slos]
+    journeys = journeys or []
+    return [with_freeze(assess(slo, values.get(slo.name, {})), freeze_scope(slo, journeys)) for slo in slos]
 
 
 # --- commands -----------------------------------------------------------------------
@@ -530,20 +562,58 @@ def cmd_dashboard(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]
     return 0
 
 
-def cmd_status(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
+def _valid(site_root: Path, doc: dict[str, Any]) -> tuple[dict[str, Any], Findings]:
     settings = doc.get("slo") or {}
     if not settings:
         raise SiteError("site.yaml has no slo section")
     found = load(site_root, doc)
     if found.errors:
         raise SiteError(f"journeys or SLOs are not valid ({len(found.errors)} problem(s)); run slo.py check")
-    slos = [
+    return settings, found
+
+
+def _selected(args: argparse.Namespace, found: Findings) -> list[Slo]:
+    return [
         slo
         for slo in found.slos
         if (not args.service or args.service in (f"component:{slo.service}", slo.service))
         and (not args.slo or slo.name == args.slo)
     ]
-    print(json.dumps({"slos": status(settings, slos, read_token(settings))}, indent=2))
+
+
+def cmd_status(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
+    settings, found = _valid(site_root, doc)
+    print(
+        json.dumps({"slos": status(settings, _selected(args, found), read_token(settings), found.journeys)}, indent=2)
+    )
+    return 0
+
+
+def cmd_nagios(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
+    """A Nagios check. Any failure is UNKNOWN (3), never the CRITICAL that exit 2 would mean."""
+    import budget  # noqa: PLC0415  pylint: disable=import-outside-toplevel
+
+    try:
+        settings, found = _valid(site_root, doc)
+        code, line = budget.nagios(status(settings, _selected(args, found), read_token(settings), found.journeys))
+    except SiteError as exc:
+        code, line = budget.NAGIOS_CODES["UNKNOWN"], budget.ascii_text(f"SLO UNKNOWN - {exc}")
+    print(line)
+    return code
+
+
+def cmd_snapshot(args: argparse.Namespace, site_root: Path, doc: dict[str, Any]) -> int:
+    import budget  # noqa: PLC0415  pylint: disable=import-outside-toplevel
+
+    settings, found = _valid(site_root, doc)
+    history = Path(args.out)
+    if not history.is_dir():
+        raise SiteError(f"history directory {history} does not exist")
+    today = date.fromisoformat(args.today) if args.today else None
+    result = budget.snapshot(
+        history, settings, found, read_token(settings), timezone=doc["incident"]["timezone"], today=today
+    )
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -562,6 +632,14 @@ def build_parser() -> argparse.ArgumentParser:
     stat.add_argument("--service", help="only this service (name or component:<name>)")
     stat.add_argument("--slo", help="only this SLO")
     stat.set_defaults(run=cmd_status)
+    check = sub.add_parser("nagios", help="a Nagios check: budget state as an exit code and one line")
+    check.add_argument("--service", help="only this service (name or component:<name>)")
+    check.add_argument("--slo", help="only this SLO")
+    check.set_defaults(run=cmd_nagios)
+    snap = sub.add_parser("snapshot", help="write daily budget snapshots, filling any missing day inside retention")
+    snap.add_argument("--out", required=True, help="history directory, one YYYY-MM.jsonl file per month")
+    snap.add_argument("--today", help="local date to treat as today (YYYY-MM-DD); for tests and reruns")
+    snap.set_defaults(run=cmd_snapshot)
     return parser
 
 
