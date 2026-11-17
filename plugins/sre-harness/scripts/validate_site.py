@@ -28,6 +28,7 @@ import autonomy
 import catalog_check
 import chat_policy
 import slo
+import stpa
 from redact import secret_label
 from sre_common import SITE_ENV, SITE_FILE, Report, SiteError, load_yaml, print_findings, resolve_site, schema_errors
 
@@ -303,6 +304,14 @@ def check_tiers(site_root: Path, doc: dict[str, Any]) -> tuple[list[str], dict[s
     return errors, {"tiers": [f"{tier['id']}:{tier['name']}" for tier in tiers]}, tiers_doc
 
 
+def check_stpa(site_root: Path, doc: dict[str, Any], report: Report) -> list[str]:
+    """Check every STPA analysis; add its problems to the report and return one line per analysis."""
+    analyses = stpa.load_analyses(site_root, doc, stpa.catalog_services(site_root, doc))
+    report.errors.extend(f"{a.rel}: {msg}" for a in analyses for msg in a.errors)
+    report.warnings.extend(f"{a.rel}: {msg}" for a in analyses for msg in a.warnings)
+    return [f"{a.path.stem} ({a.meta.get('status', '?')})" for a in analyses]
+
+
 def validate(site_root: Path) -> Report:
     """Run every check against one site repository."""
     report = Report(site_root=site_root)
@@ -352,6 +361,7 @@ def validate(site_root: Path) -> Report:
         "chat": chat_summary,
         "slo_configured": bool(doc.get("slo")),
         "slo": slo_summary,
+        "stpa_analyses": [] if path_errors else check_stpa(site_root, doc, report),
         **tier_summary,
     }
     return report

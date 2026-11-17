@@ -18,7 +18,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 5
+      "const": 6
     },
     "site": {
       "type": "object",
@@ -461,6 +461,55 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
           },
           "description": "Code-host logins whose timeline entries are trusted, beyond the tracker repository's owner, members and collaborators."
+        }
+      }
+    },
+    "reliability": {
+      "type": "object",
+      "description": "Reliability design: where STPA analyses live and the thresholds the recommendations backlog ranks by. Every key is optional; empty means the defaults.",
+      "additionalProperties": false,
+      "properties": {
+        "analyses_path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_./-]+$",
+          "description": "Directory in the site repository holding STPA analyses, one <service>.md each. Default analyses/stpa."
+        },
+        "theme_min_pirs": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 50,
+          "description": "PIRs on one service or tag, inside the window, that make a recurring theme. Default 3."
+        },
+        "theme_window_days": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 730,
+          "description": "Rolling window for recurring themes, in days. Default 180."
+        },
+        "stale_action_days": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 365,
+          "description": "An open action item older than this is stale. Default 60."
+        },
+        "action_labels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9 :_.-]{1,50}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Issue labels that mark action items, searched across every owner in repos. Default [incident, design-review]."
+        },
+        "ignore_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "uniqueItems": true,
+          "description": "PIR tags never counted as a theme, such as a tool name on every PIR. Default none."
         }
       }
     }

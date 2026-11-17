@@ -171,6 +171,21 @@ uv run scripts/report.py --month YYYY-MM --history <dir> --out reports/YYYY-MM.m
 - **Snapshots** keep what the backend's retention would lose. A daily run writes yesterday and fills any missing day still inside retention, so a missed run repairs itself. Each line records the day's attainment, the lowest budget, the highest burn rates, the worst state reached and the minutes actually measured. Design: [ADR 0016](docs/adr/0016-budget-history-is-kept-as-daily-snapshots.md).
 - **The report** is one markdown file a month with a section for every service whose tier requires an SLA report: attainment (the mean of the daily values), days captured, lowest budget, days burning fast, exhausted and frozen, the month's incidents and recommendations from fixed rules. A service with no journey says so. An incident counts against the services on its `Services:` line (`incident.py set --services`); without one, the catalog names in its `Affected:` line; an incident that matches nothing is listed as unattributed. The report exits 1 when a budgeted SLO lacks more than `--max-missing` days of snapshots, after writing.
 
+## Reliability design
+
+Three tools for learning from incidents before the next one. Design: [ADR 0017](docs/adr/0017-reliability-design-stpa-cast-and-a-ranked-backlog.md).
+
+```bash
+uv run scripts/stpa.py check                     # every analysis: schema, references, evidence rules
+uv run scripts/stpa.py render <service>          # regenerate the control-structure diagram
+uv run scripts/stpa.py findings <service>        # uncontrolled loss scenarios and their issues
+uv run scripts/trends.py [--as-of YYYY-MM-DD] [--pirs <dir>] [--json]
+```
+
+- **Design review** (skill `design-review`): a targeted STPA analysis of one service. The agent drafts losses and hazards, the control structure, unsafe control actions and loss scenarios from evidence, and a person gates each step. The analysis lives in the site repository at `<analyses_path>/<service>.md`; `validate_site.py` checks it. Each loss scenario no working control handles today becomes a `design-review` issue, after a search for an existing one.
+- **CAST** (in `create-pir`): an optional section applying the same control model to one incident. Added on request, offered once when automation acted or failed to act, and it proposes new unsafe actions or scenarios back to the service's analysis.
+- **Recommendations backlog** (`trends.py`): rule-ranked from PIR front matter (`services:`, or tags matched against the catalog) and every issue labelled with `reliability.action_labels`, searched across the owners in `repos`. It lists recurring themes, stale action items, repeat incidents with open items, and design reviews due. `report.py` appends it to the monthly report (`--pirs` points at a PIR checkout). Anything it could not read is printed as **Not complete**, never silently left out; to include issues in private repositories, run it with a token that can read them.
+
 **From chat.** With a `chat` section in `site.yaml` and the gateway running, a responder starts an incident with `/incident <text>` in Slack. The agent works it in a private channel. Every command that isn't pre-approved waits for a listed approver's click, which is recorded in the audit log. Setup and the threat model: [gateway/README.md](gateway/README.md).
 
 ## Contents
@@ -182,8 +197,9 @@ uv run scripts/report.py --month YYYY-MM --history <dir> --out reports/YYYY-MM.m
 | `skills/describe-service/` | Interviews the user and writes one service entry |
 | `skills/define-journey/` | Interviews the owner and writes a journey, its OpenSLO definitions and its error-budget policy |
 | `skills/start-incident/` | Works a live incident: record, triage, gated recovery, typed timeline |
-| `skills/create-pir/` | Writes the post-incident review from the timeline |
-| `schemas/` | JSON Schema for `site.yaml` (version 5), journey front matter, the supported OpenSLO subset, tier definitions, catalog entities and the pre-approved action list |
+| `skills/create-pir/` | Writes the post-incident review from the timeline, with an optional CAST section |
+| `skills/design-review/` | Targeted STPA analysis of one service, gated step by step; files findings |
+| `schemas/` | JSON Schema for `site.yaml` (version 6), journey front matter, STPA analyses, the supported OpenSLO subset, tier definitions, catalog entities and the pre-approved action list |
 | `scripts/validate_site.py` | Site validation: schema, paths, references, audit privacy, secret shapes, catalog |
 | `scripts/catalog_sync.py` | Source adapters and the generated layer |
 | `scripts/catalog_check.py` | Entity validation and drift report |
@@ -196,7 +212,9 @@ uv run scripts/report.py --month YYYY-MM --history <dir> --out reports/YYYY-MM.m
 | `scripts/chat_policy.py` | Tool policy for an agent driven from chat: the read-only allow-list, the deny-list, checks on a site's additions |
 | `scripts/slo.py` | Journeys and SLOs: `check`, `generate` (recording rules), `dashboard`, `status` (attainment, budget remaining, budget state, freeze) |
 | `scripts/budget.py` | Error-budget enforcement and history: the live Tier 2 gate, the Nagios check, daily snapshots |
-| `scripts/report.py` | The monthly reliability report, from snapshots, the catalog and the incident tracker |
+| `scripts/report.py` | The monthly reliability report, from snapshots, the catalog and the incident tracker, ending with the recommendations backlog |
+| `scripts/stpa.py` | STPA analyses: `check`, `render` (Mermaid diagram), `findings` |
+| `scripts/trends.py` | The recommendations backlog: themes, stale action items, repeat incidents, design reviews due |
 | `scripts/kube_read.py` | Read-only kubectl for an agent driven from chat: allowed verbs and options only, checked per argument, no shell |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
@@ -208,6 +226,8 @@ uv run scripts/report.py --month YYYY-MM --history <dir> --out reports/YYYY-MM.m
 Scripts need [`uv`](https://docs.astral.sh/uv/); dependencies are declared inline. Catalog sync also needs `git`, and `helm` for chart areas. The incident scripts need the `gh` CLI, signed in.
 
 ## Upgrading a site
+
+**From schema version 5 to 6.** Set `schema_version: 6`. The new `reliability` section is optional; leave it out or set `reliability: {}` for the defaults. Add `services:` (catalog names) to the front matter of PIRs so the backlog can attribute them.
 
 **From schema version 4 to 5.** Set `schema_version: 5`. `slo: {}` stays valid and means no SLOs; the template shows a filled-in `slo` section.
 

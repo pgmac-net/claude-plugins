@@ -14,7 +14,8 @@ For each service: its SLOs' attainment over the month (the mean of the daily
 values), how many days were captured, the lowest budget remaining, the days
 spent burning fast, exhausted and frozen, the month's incidents, and
 recommendations from fixed rules. A service with no journey says so; it is
-never shown as healthy.
+never shown as healthy. The report ends with the recommendations backlog
+that trends.py ranks from PIR trends and open action items.
 
 An incident is an issue in the tracker whose body was written by
 incident.py. It belongs to the services on its 'Services:' line, or, when
@@ -43,6 +44,7 @@ import catalog_check
 import incident
 import slo
 import sre_common
+import trends
 from sre_common import SiteError, guarded, load_site, load_yaml
 
 WORD = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -114,19 +116,19 @@ def report_services(site_root: Path, doc: dict[str, Any]) -> tuple[list[Service]
     """Services whose tier requires an SLA report, and every Component's name and resources for attribution."""
     tiers_doc = load_yaml(site_root / doc["tiers_file"])
     needing = {tier["id"] for tier in tiers_doc.get("tiers", []) if "sla_report" in tier.get("requires", [])}
+    names, tiers = trends.component_names(site_root, doc)
     report = catalog_check.CatalogReport()
-    entities = catalog_check.load_entities(site_root / doc["catalog"]["path"], report)
-    names: dict[str, set[str]] = {}
     services = []
-    for entity in entities:
-        if entity.doc["kind"] != "Component":
-            continue
-        resources = {ref.split(":", 1)[1] for ref in entity.spec.get("dependsOn", []) if ref.startswith("resource:")}
-        names[entity.ref] = {entity.doc["metadata"]["name"], *resources}
-        sre = entity.spec.get("sre") or {}
-        if sre.get("tier") in needing:
+    for entity in catalog_check.load_entities(site_root / doc["catalog"]["path"], report):
+        if entity.ref in tiers and tiers[entity.ref] in needing:
+            sre = entity.spec.get("sre") or {}
+            resources = {
+                ref.split(":", 1)[1] for ref in entity.spec.get("dependsOn", []) if ref.startswith("resource:")
+            }
             services.append(
-                Service(entity.ref, entity.doc["metadata"]["name"], sre["tier"], sre.get("purpose", ""), resources)
+                Service(
+                    entity.ref, entity.doc["metadata"]["name"], tiers[entity.ref], sre.get("purpose", ""), resources
+                )
             )
     return sorted(services, key=lambda s: (s.tier, s.name)), names
 
@@ -395,7 +397,9 @@ def render(site_name: str, month: Month, inputs: Inputs, yesterday: date) -> str
 # --- command ---------------------------------------------------------------------------
 
 
-def build(site_root: Path, doc: dict[str, Any], month: Month, history: Path, yesterday: date) -> tuple[str, int]:
+def build(  # noqa: PLR0913  pylint: disable=too-many-arguments
+    site_root: Path, doc: dict[str, Any], month: Month, history: Path, yesterday: date, *, pirs: str | None = None
+) -> tuple[str, int]:
     """The report text and the largest number of days missing for any budgeted SLO."""
     found = slo.load(site_root, doc)
     if found.errors:
@@ -409,6 +413,8 @@ def build(site_root: Path, doc: dict[str, Any], month: Month, history: Path, yes
     incidents, follow_ups = split_issues(tracker_issues(doc), names, month)
     inputs = Inputs(services, found.slos, rows, incidents, follow_ups, first_seen)
     text = render(doc["site"]["name"], month, inputs, yesterday)
+    backlog = trends.build(site_root, doc, min(month.last, yesterday), pirs)
+    text += "\n" + "\n".join(trends.render_section(backlog)).rstrip() + "\n"
     missing = max(
         (len(slo_figures(one, inputs, month, yesterday)["missing"]) for one in found.slos if one.budget), default=0
     )
@@ -421,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--month", help="YYYY-MM; default is last month in the site's time zone")
     parser.add_argument("--history", required=True, help="the snapshot history directory")
     parser.add_argument("--out", help="file to write; default is standard output")
+    parser.add_argument("--pirs", help="directory of PIRs for the backlog; default is the tracker's local checkout")
     parser.add_argument("--max-missing", type=int, default=3, help="days of snapshots a budgeted SLO may lack")
     args = parser.parse_args(argv)
 
@@ -432,7 +439,7 @@ def main(argv: list[str] | None = None) -> int:
         history = Path(args.history)
         if not history.is_dir():
             raise SiteError(f"history directory {history} does not exist")
-        text, missing = build(site_root, doc, month, history, today - timedelta(days=1))
+        text, missing = build(site_root, doc, month, history, today - timedelta(days=1), pirs=args.pirs)
         if args.out:
             Path(args.out).parent.mkdir(parents=True, exist_ok=True)
             Path(args.out).write_text(text, encoding="utf-8")

@@ -13,6 +13,7 @@ one site.
 | `.githooks/post-merge` | Optional: clears local incident state after a pull once the audit log has merged. Install by copying it into `.git/hooks` (see the file's header), not with `core.hooksPath` |
 | `procedures/` | How incidents are worked here: monitoring access, evidence, comms, review format |
 | `audit/` | Per-incident audit logs |
+| `analyses/stpa/` | STPA design reviews, one per service (skill `design-review`) |
 | `docs/adr/` | Site decisions |
 | `CONTEXT.md` | Site-specific terms |
 | `site-identifiers.txt` | Real identifiers, for the local leak check |
