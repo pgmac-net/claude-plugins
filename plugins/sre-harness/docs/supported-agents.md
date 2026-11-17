@@ -24,7 +24,7 @@ Every row runs the same alert drill: an unattended triage of a made-up alert, an
 | Claude Code (gateway) | Claude (default) | pass | pass | pass | pass | pass | pass | pass | hook |
 | Pi 1.5 | claude-bridge/claude-sonnet-5-5 | pass | pass | pass | partial | pass | pass | pass | hook |
 | Pi 1.5 | opencode-go/kimi-k3 | not run | | | | | | | |
-| Pi 1.5 + pi-llama | self-hosted (llama.cpp) | not run | | | | | | | |
+| Pi 1.5 + pi-llama | Qwen3-8B Q4_K_M (self-hosted, CPU) | pass | **fail** | | | | | | hook |
 | Codex | | not run | | | | | | | |
 
 Notes:
@@ -38,7 +38,12 @@ Notes:
   - Audit: 27 records, all `agent: pi`, `capture: hook`, chain intact, none incomplete. The two flagged "mutations" are the two blocked attempts, which never ran.
   - Two earlier runs found faults in the proof guard, not the harness: `catalog-39` and `catalog-40`.
 - **kimi-k3**: the provider refuses without an OpenCode Go subscription (403).
-- **Self-hosted**: see below.
+- **Qwen3-8B, self-hosted**, 2026-11-17:
+  - It found the skill.
+  - It ignored the instruction to open with `--auto --drill` and ran a plain `incident.py open`. That opened a record on the **public** tracker; it was closed by hand as not planned.
+  - The run was stopped there.
+  - The gateway's rules would have refused that call. Outside the gateway, nothing did, so `incident.py open` now refuses anything but `--auto` inside a triage.
+  - The floor for a model this size: it does not follow the record rules, and is not supported for incident work, even in drills.
 - **Codex**: the local install does not start.
 
 ## What an agent other than Claude Code needs
@@ -53,4 +58,4 @@ Notes:
 
 A self-hosted model runs through Pi's `pi-llama` package against a llama.cpp server (`LLAMA_BASE_URL`, default `http://localhost:9931/v1`). The chosen model is `gpt-oss-20b` (MXFP4, about 13 GB of weights), with `Qwen3-14B` Q4 (about 9 GB) as the fallback.
 
-It has not been run yet. On the laptop used for the other rows, 8 GB of swap was already almost full and about 9.8 GB of memory was free, so loading either model would have pushed that machine into heavy swapping. It needs a host with at least 16 GB free, or a smaller model, and that is the site owner's choice.
+The laptop used for the other rows could not hold either model without heavy swapping, so the site owner chose a smaller one: `Qwen3-8B` Q4_K_M, with 24k context and a q8 KV cache, about 7 GB in all. It ran on CPU and failed the Record step (see Notes). A larger model on a host with at least 16 GB free is still untested.

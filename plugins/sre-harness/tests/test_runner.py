@@ -302,6 +302,13 @@ class TestTriagePolicy:
         monkeypatch.setenv(sre_common.TRIAGE_ENV, "not-a-token")
         assert incident.main(["set", "--incident", other, "--phase", "Diagnosing"]) == 2
 
+    def test_a_triage_session_cannot_open_on_the_public_tracker(self, gh, capsys, monkeypatch):
+        monkeypatch.setenv(sre_common.TRIAGE_ENV, "ab" * 16)
+        assert incident.main(["open", "--title", "Shop is down", "--severity", "P2"]) == 2
+        assert "--auto" in capsys.readouterr().err
+        assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
+        assert open_auto(capsys)["id"].startswith("catalog-")
+
     def test_triage_withholds_record_changes_and_allows_only_auto_open(self, tmp_path):
         rules = chat_policy.triage_rules({}, tmp_path)
         script = tmp_path / "incident.py"
