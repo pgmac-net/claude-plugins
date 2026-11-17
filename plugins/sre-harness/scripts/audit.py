@@ -82,14 +82,18 @@ def verify(entries: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
     unfinished = sorted((r for records in pending.values() for r in records), key=lambda r: r["ts"])
 
     events: dict[str, int] = {}
+    agents: dict[str, int] = {}
     for _line, record in entries:
         events[record.get("event", "unknown")] = events.get(record.get("event", "unknown"), 0) + 1
+        if record.get("agent"):
+            agents[record["agent"]] = agents.get(record["agent"], 0) + 1
     return {
         "records": len(entries),
         "head": previous,
         "chain_intact": not broken,
         "broken_at_lines": broken,
         "events": dict(sorted(events.items())),
+        "agents": dict(sorted(agents.items())),
         "self_reported": sum(1 for _line, record in entries if record.get("capture") == "self-reported"),
         "capture_errors": events.get("capture_error", 0),
         "attempts_without_completion": [
@@ -318,6 +322,11 @@ def cmd_record(args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, 
     for key in ("command", "approver"):
         if getattr(args, key):
             record[key] = redact.redact_text(getattr(args, key), env_values)
+    if args.agent or args.model:
+        # A self-reporting agent names itself; the same shape rules as the hook apply.
+        record["agent"], model = audit_hook.agent_of({"agent": args.agent or "unknown", "model": args.model})
+        if model:
+            record["model"] = model
     audit_hook.append(state["id"], record)
     print(f"{state['id']}: recorded {args.kind}")
     return 0
@@ -569,6 +578,8 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--text", required=True, help="what was decided, approved or done, and why")
     record.add_argument("--command", dest="command_text", help="the exact command this record is about")
     record.add_argument("--approver", help="who approved or denied")
+    record.add_argument("--agent", help="the agent writing this record, if it has no hook (codex, opencode, ...)")
+    record.add_argument("--model", help="the model it runs, as provider/model")
     record.set_defaults(run=cmd_record)
 
     sub.add_parser("show", help="where the log is and what it holds").set_defaults(run=cmd_show)

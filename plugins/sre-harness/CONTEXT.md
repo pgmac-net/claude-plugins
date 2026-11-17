@@ -174,6 +174,18 @@ _Avoid_: History, transcript, command log
 How an audit record came to exist: by the hook, or self-reported by an agent that has none.
 _Avoid_: Source, origin
 
+**Agent**:
+The program that runs the skills and calls the tools (Claude Code, Pi, Codex), as distinct from the model it runs. Every audit record names it.
+_Avoid_: Harness (that is this plugin), client, LLM
+
+**Agent adapter**:
+A small piece of agent-specific code that turns that agent's tool events into the audit hook's input, so capture is the same code everywhere.
+_Avoid_: Shim (that is AGENTS.md), wrapper, plugin
+
+**Supported floor**:
+The documented, per-step result of the alert drill for one agent and model: what is known to work, and what is not.
+_Avoid_: Compatibility matrix, certification
+
 **Timeline**:
 The curated, human-readable record of an incident, made of typed entries on the incident issue.
 _Avoid_: Log, notes, journal

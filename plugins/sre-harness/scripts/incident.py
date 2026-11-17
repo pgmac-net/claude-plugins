@@ -236,6 +236,10 @@ def cmd_open(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     cleared = state_gc.auto_clean(doc, args.site_root)
     if cleared:
         print(f"Cleared local state of {cleared} earlier incident(s) whose audit log has merged.", file=sys.stderr)
+    if sre_common.triage_token() and not args.auto:
+        # The gateway's rules allow only 'open --auto' in a triage, but an agent outside the gateway
+        # (or a model that ignores its instructions) would otherwise open on the public tracker.
+        raise SiteError("this session is an unattended triage; open its record with --auto (it stays private)")
     alias, repo, label = tracker(doc, args.drill, args.auto)
     existing = already_open(doc, args, (alias, repo, label))
     if existing and not args.new:
