@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-labelledby="title desc">
+  <title id="title">SRE harness</title>
+  <desc id="desc">A carabiner with a heartbeat line running through it, on a dark slate tile.</desc>
+  <!-- Full-bleed tile: Slack and Notion round the corners themselves. -->
+  <rect width="1024" height="1024" fill="#1E293B"/>
+  <!-- The carabiner: a D-shaped loop, tilted, open on its straight side below the pulse. -->
+  <g transform="translate(512 512) rotate(30) scale(1.04) translate(-512 -512)" fill="none" stroke="#F1F5F9" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke-width="84" d="M 700 646 L 700 650 A 170 170 0 0 1 530 820 L 500 820 A 130 130 0 0 1 370 690 L 370 330 A 130 130 0 0 1 500 200 L 530 200 A 170 170 0 0 1 700 370 L 700 490"/>
+  </g>
+  <!-- The pulse, over the loop. -->
+  <path d="M 108 512 L 372 512 L 436 356 L 530 680 L 600 512 L 916 512" fill="none" stroke="#F97316" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

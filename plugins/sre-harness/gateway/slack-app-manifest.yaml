@@ -4,6 +4,7 @@
 # connections:write scope (Basic Information > App-Level Tokens).
 # Socket Mode: no request URL, no inbound port.
 display_information:
+  background_color: "#1E293B"
   name: SRE Harness
   description: Works incidents with an agent; mutations need an approver's click.
 features:

@@ -22,7 +22,7 @@ def exprs(panels):
 def test_budgeted_slo_row_reads_only_recorded_series_and_its_probe():
     model = slo_dashboard.build([make("ingress-open")])
     panels = model["panels"]
-    titles = [p["title"] for p in panels]
+    titles = [p["title"] for p in panels if p["type"] != "text"]
     assert titles[0].startswith("ingress-open: 99.50% over 7d (spends budget)")
     assert "Budget left (minutes)" in titles
     assert "Burn rate (1h)" in titles and "Burn rate (6h)" in titles
@@ -40,6 +40,15 @@ def test_informational_slo_has_no_budget_panels_and_comes_after_budgeted_ones():
     requests_panels = model["panels"][[p["title"] for p in model["panels"]].index(rows[1]) :]
     assert not any(p["title"].startswith(("Budget", "Burn")) for p in requests_panels)
     assert any("sum(rate(" in e for e in exprs(requests_panels))
+
+
+def test_dashboard_opens_with_the_icon_header_above_every_row():
+    model = slo_dashboard.build([make("a")])
+    header, first = model["panels"][0], model["panels"][1]
+    assert header["type"] == "text" and header["gridPos"]["y"] == 0
+    assert slo_dashboard.ICON_URL in header["options"]["content"]
+    assert first["gridPos"]["y"] == slo_dashboard.HEADER_HEIGHT
+    assert not any(panel["gridPos"]["y"] < slo_dashboard.HEADER_HEIGHT for panel in model["panels"][1:])
 
 
 def test_ids_unique_and_layout_does_not_overlap():
@@ -73,7 +82,7 @@ def test_dashboard_command_writes_then_checks(slo_site, capsys):  # noqa: F811
     assert slo.main(["--site", str(slo_site), "dashboard", "--check"]) == 1
     assert slo.main(["--site", str(slo_site), "dashboard"]) == 0
     model = json.loads((slo_site / "slo" / "dashboard.json").read_text(encoding="utf-8"))
-    assert model["panels"][0]["title"].startswith("example-open-app")
+    assert next(p for p in model["panels"] if p["type"] == "row")["title"].startswith("example-open-app")
     assert slo.main(["--site", str(slo_site), "dashboard", "--check"]) == 0
     write_slo(slo_site, counter_slo(), name="requests")
     assert slo.main(["--site", str(slo_site), "dashboard", "--check"]) == 1
