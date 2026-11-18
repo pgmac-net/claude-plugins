@@ -153,6 +153,8 @@ def _segments(command: str) -> list[list[str]] | None:
     """Split a command into simple commands at unquoted shell operators. None if it cannot be parsed."""
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    # bash starts a comment only at the start of a word; shlex would end the line at any "#" and hide what follows.
+    lexer.commenters = ""
     try:
         tokens = list(lexer)
     except ValueError:
@@ -164,6 +166,11 @@ def _segments(command: str) -> list[list[str]] | None:
         else:
             segments[-1].append(token)
     return [segment for segment in segments if segment]
+
+
+def command_segments(command: str) -> list[list[str]] | None:
+    """The simple commands in a shell line, split at unquoted operators; None if it cannot be parsed."""
+    return _segments(command)
 
 
 def _is_harness_call(tokens: list[str]) -> bool:

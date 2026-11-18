@@ -27,9 +27,20 @@ import audit  # noqa: E402
 import chat_policy  # noqa: E402
 import redact  # noqa: E402
 import sre_common  # noqa: E402
+import tool_policy  # noqa: E402
 import validate_site  # noqa: E402
 
-__all__ = ["PLUGIN_ROOT", "SCRIPTS", "alerts", "audit", "chat_policy", "redact", "sre_common", "validate_site"]
+__all__ = [
+    "PLUGIN_ROOT",
+    "SCRIPTS",
+    "alerts",
+    "audit",
+    "chat_policy",
+    "redact",
+    "sre_common",
+    "tool_policy",
+    "validate_site",
+]
 
 INCIDENT_CALL = re.compile(r"(?:^|\s)\S*/scripts/incident\.py\s+(open|attach|close|promote|dismiss)\b")
 RESULT_LINE = re.compile(r'^\{"id":.*\}$', re.MULTILINE)
