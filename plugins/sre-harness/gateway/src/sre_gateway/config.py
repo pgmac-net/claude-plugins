@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,11 @@ from sre_gateway import harness
 MCP_CONFIG_ENV = "SRE_GATEWAY_MCP_CONFIG"
 MODEL_ENV = "SRE_GATEWAY_MODEL"
 STATE_ENV = "SRE_GATEWAY_STATE"
+AGENT_ENV = "SRE_GATEWAY_AGENT"
+PI_ENV = "SRE_GATEWAY_PI"
+PI_HOME_ENV = "SRE_GATEWAY_PI_HOME"
+NAGIOS_MCP_ENV = "SRE_GATEWAY_NAGIOS_MCP"
+AGENTS = ("claude-code", "pi")
 
 
 class ConfigError(Exception):
@@ -29,6 +35,26 @@ class Config:
     mcp_config: Path | None = None
     model: str | None = None
     state_dir: Path = field(default_factory=lambda: harness.sre_common.state_dir() / "gateway")
+    agent: str = "claude-code"
+    pi: str = "pi"
+    pi_home: Path = field(default_factory=lambda: Path.home() / ".config" / "sre-harness" / "pi")
+    nagios_mcp: str = "nagios-mcp"
+
+    def nagios_base_url(self) -> str | None:
+        """Nagios's base URL, from the runner's status URL: 'http://h/cgi-bin/statusjson.cgi' -> 'http://h/'."""
+        head, sep, _ = str(self.runner.get("status_url") or "").partition("cgi-bin/")
+        return head if sep else None
+
+    def mcp_servers(self) -> dict[str, dict[str, Any]]:
+        """The servers in the gateway's MCP configuration file; empty when there is none."""
+        if not self.mcp_config:
+            return {}
+        try:
+            doc = json.loads(self.mcp_config.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ConfigError(f"{MCP_CONFIG_ENV} could not be read as JSON: {exc.__class__.__name__}") from exc
+        servers = doc.get("mcpServers") if isinstance(doc, dict) else None
+        return servers if isinstance(servers, dict) else {}
 
     @property
     def responders(self) -> frozenset[str]:
@@ -143,4 +169,11 @@ def load(env: dict[str, str] | None = None, take_tokens: bool = True) -> Config:
     )
     if env.get(STATE_ENV):
         config.state_dir = Path(env[STATE_ENV]).expanduser()
+    config.agent = env.get(AGENT_ENV) or "claude-code"
+    if config.agent not in AGENTS:
+        raise ConfigError(f"{AGENT_ENV} must be one of {', '.join(AGENTS)}")
+    config.pi = env.get(PI_ENV) or config.pi
+    config.nagios_mcp = env.get(NAGIOS_MCP_ENV) or config.nagios_mcp
+    if env.get(PI_HOME_ENV):
+        config.pi_home = Path(env[PI_HOME_ENV]).expanduser()
     return config

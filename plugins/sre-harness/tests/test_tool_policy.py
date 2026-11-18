@@ -179,6 +179,19 @@ def test_brace_and_bracket_globs_ask(chat, home, pattern):
     assert tool_policy.decide(chat, "find", {"pattern": pattern}, home / "site").decision == ASK
 
 
+def test_a_grep_regex_never_stands_in_for_the_path(chat, home):
+    site, key = home / "site", str(home / ".ssh" / "id_ed25519")
+    assert tool_policy.decide(chat, "grep", {"pattern": "/tmp/x", "path": key}, site).decision == DENY
+    assert tool_policy.decide(chat, "grep", {"pattern": "../x", "path": key}, site).decision == DENY
+    assert tool_policy.decide(chat, "grep", {"pattern": "[0-9]+", "path": str(site)}, site).decision == ALLOW
+
+
+def test_a_grep_file_filter_that_escapes_is_checked(chat, home):
+    site = home / "site"
+    assert tool_policy.decide(chat, "grep", {"pattern": "x", "glob": f"{home}/.ssh/*"}, site).decision == DENY
+    assert tool_policy.decide(chat, "grep", {"pattern": "x", "glob": "{a,b}.yaml"}, site).decision == ASK
+
+
 def test_mcp_and_other_tools_need_a_rule_naming_them(chat, home):
     site = home / "site"
     assert tool_policy.decide(chat, "mcp__nagios__get_alerts", {}, site).decision == ALLOW

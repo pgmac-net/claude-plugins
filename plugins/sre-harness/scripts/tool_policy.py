@@ -205,21 +205,27 @@ def _glob_root(pattern: str) -> str | None:
     return fixed.rsplit("/", 1)[0] or "/" if "/" in fixed else fixed
 
 
-def _target(tool_input: dict[str, Any], cwd: Path) -> Path:
-    """The path a file tool acts on, absolute and with symlinks resolved; the working directory if none.
+def _absolute(raw: str, base: Path) -> Path:
+    path = Path(os.path.expanduser(raw))
+    return Path(os.path.realpath(path if path.is_absolute() else base / path))
 
-    A glob pattern that is absolute or climbs out ('..') names where the search really starts.
+
+def _targets(tool: str, tool_input: dict[str, Any], cwd: Path) -> list[Path]:
+    """Every path a file tool may act on, absolute with symlinks resolved; the working directory if none is named.
+
+    Every path argument is checked. For Glob, a pattern that is absolute or climbs out ('..') also names
+    where the search starts, as does a file-filter glob of Grep; Grep's own pattern is a regex, never a path.
     """
-    raw = next((tool_input[key] for key in PATH_KEYS if isinstance(tool_input.get(key), str) and tool_input[key]), None)
-    pattern = tool_input.get("pattern")
-    escaping = _glob_root(pattern) if isinstance(pattern, str) else None
-    if escaping is not None:
-        base = Path(os.path.expanduser(raw)) if raw else cwd
-        raw = str(Path(os.path.expanduser(escaping)) if escaping.startswith(("/", "~")) else base / escaping)
-    path = Path(os.path.expanduser(raw)) if raw else cwd
-    if not path.is_absolute():
-        path = cwd / path
-    return Path(os.path.realpath(path))
+    named = [tool_input[key] for key in PATH_KEYS if isinstance(tool_input.get(key), str) and tool_input[key]]
+    base = _absolute(named[0], cwd) if named else cwd
+    paths = [_absolute(raw, cwd) for raw in named] or [cwd]
+    globs = [tool_input.get("pattern")] if tool == "Glob" else []
+    globs.append(tool_input.get("glob"))
+    for pattern in globs:
+        root = _glob_root(pattern) if isinstance(pattern, str) else None
+        if root is not None:
+            paths.append(_absolute(root, base))
+    return paths
 
 
 def _path_matches(rule: Rule, path: Path, home: Path) -> bool:
@@ -243,10 +249,11 @@ def _contains_denied(root: Path, regex: re.Pattern[str]) -> bool | None:
     return False
 
 
-def _search_problem(policy: Policy, rule: Rule, path: Path, tool_input: dict[str, Any]) -> str | None:
+def _search_problem(policy: Policy, rule: Rule, path: Path, tool: str, tool_input: dict[str, Any]) -> str | None:
     """Why a recursive search from path could reach what a deny rule protects; None if it cannot."""
-    pattern = tool_input.get("pattern")
-    if isinstance(pattern, str) and re.search(r"[{\[]", pattern):
+    # Glob's pattern and Grep's file filter are globs; Grep's pattern is a regex, where brackets are ordinary.
+    globs = [tool_input.get("glob"), tool_input.get("pattern") if tool == "Glob" else None]
+    if any(isinstance(g, str) and re.search(r"[{\[]", g) for g in globs):
         return "glob patterns with braces or brackets need approval"
     root = _literal_root(rule.content or "", policy.home)
     if root is not None:
@@ -258,7 +265,16 @@ def _search_problem(policy: Policy, rule: Rule, path: Path, tool_input: dict[str
 
 
 def _judge_path_tool(policy: Policy, tool: str, tool_input: dict[str, Any], cwd: Path) -> Verdict:
-    path = _target(tool_input, cwd)
+    """The strictest verdict over every path the call may touch."""
+    verdicts = [_judge_path(policy, tool, tool_input, path) for path in _targets(tool, tool_input, cwd)]
+    for decision in (DENY, ASK):
+        for verdict in verdicts:
+            if verdict.decision == decision:
+                return verdict
+    return verdicts[0]
+
+
+def _judge_path(policy: Policy, tool: str, tool_input: dict[str, Any], path: Path) -> Verdict:
     # Read rules protect a path from editing too; Edit rules only from editing.
     guarded_by = {"Read", "Edit"} if tool in WRITE_TOOLS else {"Read"}
     for rule in policy.deny:
@@ -267,7 +283,7 @@ def _judge_path_tool(policy: Policy, tool: str, tool_input: dict[str, Any], cwd:
                 continue
             if _path_matches(rule, path, policy.home):
                 return Verdict(DENY, f"denied by {rule.tool}({rule.content or ''})")
-            problem = _search_problem(policy, rule, path, tool_input) if tool in SEARCH_TOOLS else None
+            problem = _search_problem(policy, rule, path, tool, tool_input) if tool in SEARCH_TOOLS else None
             if problem:
                 return Verdict(ASK, problem)
     for rule in policy.allow:

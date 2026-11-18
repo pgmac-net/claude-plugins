@@ -38,7 +38,6 @@ DIALOGS = frozenset({"select", "confirm", "input", "editor"})
 LINE_LIMIT = 16 * 1024 * 1024
 STOP_SECONDS = 10.0
 COMMAND_SECONDS = 60.0
-ADAPTERS = harness.PLUGIN_ROOT / "adapters" / "pi"
 
 
 @dataclass
@@ -152,6 +151,55 @@ def _explain(error: str) -> str:
     return next((text for key, text in ERRORS.items() if key in lowered), error)
 
 
+Translated = tuple[list[Event], str | None]
+
+
+def _message_end(record: dict[str, Any]) -> Translated:
+    message = record.get("message") or {}
+    if message.get("role") != "assistant":
+        return [], None
+    events: list[Event] = [
+        Text(part["text"])
+        for part in message.get("content") or []
+        if isinstance(part, dict) and part.get("type") == "text" and str(part.get("text", "")).strip()
+    ]
+    failure = message.get("errorMessage") if message.get("stopReason") == "error" else None
+    if failure:
+        events.append(Notice(_explain(str(failure))))
+    return events, str(failure) if failure else None
+
+
+def _tool_start(record: dict[str, Any]) -> Translated:
+    name = harness.tool_policy.canonical_tool(str(record.get("toolName", "")))
+    return [ToolCall(str(record.get("toolCallId", "")), name, dict(record.get("args") or {}))], None
+
+
+def _tool_end(record: dict[str, Any]) -> Translated:
+    text = _result_text(record.get("result"))
+    return [ToolOutput(str(record.get("toolCallId", "")), text, bool(record.get("isError")))], None
+
+
+def _extension_error(record: dict[str, Any]) -> Translated:
+    return [Notice(f"A Pi extension failed in {record.get('event')}: {record.get('error')}")], None
+
+
+def _retry_end(record: dict[str, Any]) -> Translated:
+    if record.get("success"):
+        return [], None
+    final = str(record.get("finalError", "the provider kept failing"))
+    return [Notice(_explain(final))], final
+
+
+# Pi events the gateway shows; the rest (streaming deltas, turn bookkeeping) are dropped.
+TRANSLATORS = {
+    "message_end": _message_end,
+    "tool_execution_start": _tool_start,
+    "tool_execution_end": _tool_end,
+    "extension_error": _extension_error,
+    "auto_retry_end": _retry_end,
+}
+
+
 class PiDriver:  # pylint: disable=too-many-instance-attributes
     """Runs one Pi session in RPC mode."""
 
@@ -171,6 +219,7 @@ class PiDriver:  # pylint: disable=too-many-instance-attributes
         self._triage_token = triage_token
         self._process: asyncio.subprocess.Process | None = None
         self._reader: asyncio.Task | None = None
+        self._stderr: asyncio.Task | None = None
         self._events: asyncio.Queue = asyncio.Queue()
         self._pending: dict[str, asyncio.Future] = {}
         self._ids = itertools.count(1)
@@ -197,7 +246,7 @@ class PiDriver:  # pylint: disable=too-many-instance-attributes
             limit=LINE_LIMIT,
         )
         self._reader = asyncio.create_task(self._read())
-        asyncio.create_task(self._drain_stderr())
+        self._stderr = asyncio.create_task(self._drain_stderr())
         state = await self._command({"type": "get_state"})
         if not state.get("success"):
             raise RuntimeError(f"Pi did not start: {state.get('error', 'no state')}")
@@ -220,8 +269,9 @@ class PiDriver:  # pylint: disable=too-many-instance-attributes
                 await asyncio.wait_for(process.wait(), STOP_SECONDS)
             except TimeoutError:
                 process.kill()
-        if self._reader:
-            self._reader.cancel()
+        for task in (self._reader, self._stderr):
+            if task:
+                task.cancel()
 
     # --- a turn ------------------------------------------------------------------
 
@@ -229,6 +279,9 @@ class PiDriver:  # pylint: disable=too-many-instance-attributes
         if self._process is None:
             raise RuntimeError("the agent session is not started")
         error: str | None = None
+        if message.lstrip().startswith("/"):
+            # Pi runs a leading '/' as an extension command or skill; chat text is never a command.
+            message = f"(chat message) {message}"
         reply = await self._command({"type": "prompt", "message": message})
         if not reply.get("success"):
             yield TurnEnd(self.session_id, f"Pi refused the message: {reply.get('error', 'unknown error')}")
@@ -254,32 +307,8 @@ class PiDriver:  # pylint: disable=too-many-instance-attributes
 
     def _translate(self, record: dict[str, Any]) -> tuple[list[Event], str | None]:
         """The gateway's events for one Pi event, and an error it reports, if any."""
-        kind = record.get("type")
-        if kind == "message_end":
-            message = record.get("message") or {}
-            if message.get("role") != "assistant":
-                return [], None
-            events: list[Event] = [
-                Text(part["text"])
-                for part in message.get("content") or []
-                if isinstance(part, dict) and part.get("type") == "text" and str(part.get("text", "")).strip()
-            ]
-            failure = message.get("errorMessage") if message.get("stopReason") == "error" else None
-            if failure:
-                events.append(Notice(_explain(str(failure))))
-            return events, str(failure) if failure else None
-        if kind == "tool_execution_start":
-            name = harness.tool_policy.canonical_tool(str(record.get("toolName", "")))
-            return [ToolCall(str(record.get("toolCallId", "")), name, dict(record.get("args") or {}))], None
-        if kind == "tool_execution_end":
-            text = _result_text(record.get("result"))
-            return [ToolOutput(str(record.get("toolCallId", "")), text, bool(record.get("isError")))], None
-        if kind == "extension_error":
-            return [Notice(f"A Pi extension failed in {record.get('event')}: {record.get('error')}")], None
-        if kind == "auto_retry_end" and not record.get("success"):
-            final = str(record.get("finalError", "the provider kept failing"))
-            return [Notice(_explain(final))], final
-        return [], None
+        handler = TRANSLATORS.get(str(record.get("type")))
+        return handler(record) if handler else ([], None)
 
     # --- the protocol --------------------------------------------------------------
 

@@ -5,14 +5,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import shutil
 import signal
 import sys
+from collections.abc import Callable
 from typing import Any
 
-from sre_gateway import harness, prompts
+from sre_gateway import harness, pi, prompts
 from sre_gateway.agent import AskPermission, SdkDriver
 from sre_gateway.approvals import Decision
-from sre_gateway.config import Config, ConfigError, load
+from sre_gateway.config import MODEL_ENV, PI_ENV, Config, ConfigError, load
 from sre_gateway.gateway import Gateway, Settings
 from sre_gateway.runner import NagiosFeed, Runner, RunnerSettings, RunnerState
 from sre_gateway.tracker import GhTracker
@@ -57,6 +59,52 @@ def agent_options(config: Config, resume: str | None, can_use_tool: Any, triage:
     return ClaudeAgentOptions(**options)
 
 
+def pi_problems(config: Config) -> list[str]:
+    """Why the gateway cannot run Pi with this configuration; empty when it can."""
+    problems = []
+    if not config.model or "/" not in config.model:
+        problems.append(f"{MODEL_ENV} must name the Pi model as provider/id")
+    if not pi.find_pi(config.pi):
+        problems.append(f"no Pi binary '{config.pi}' ({PI_ENV})")
+    if config.runner and not config.runner_auth:
+        problems.append("the runner has no read-only Nagios login for the agent's Nagios tools")
+    return problems
+
+
+def pi_driver_factory(config: Config) -> Callable[[AskPermission, str | None], pi.PiDriver]:
+    """Set up the gateway-owned Pi home, and return a factory for Pi sessions under the chat policy."""
+    nagios = None
+    base = config.nagios_base_url()
+    if config.runner_auth and base:
+        user, password = config.runner_auth
+        nagios = {"nagios_url": base, "nagios_user": user, "nagios_pass": password}
+    for warning in pi.prepare_home(config.pi_home, config.mcp_servers(), nagios, shutil.which(config.nagios_mcp)):
+        log.warning("%s", warning)
+    setup = pi.PiSetup(
+        pi=pi.find_pi(config.pi) or config.pi,
+        model=config.model or "",
+        home=config.pi_home,
+        session_dir=config.state_dir / "pi-sessions",
+        cwd=config.site_root,
+        env={"SRE_HARNESS_SITE": str(config.site_root)},
+    )
+    policies = {
+        False: harness.tool_policy.Policy.from_rules(harness.chat_policy.rules(config.chat)),
+        True: harness.tool_policy.Policy.from_rules(harness.chat_policy.triage_rules(config.chat)),
+    }
+
+    def make(ask: AskPermission, triage: str | None) -> pi.PiDriver:
+        return pi.PiDriver(
+            setup,
+            policies[bool(triage)],
+            ask,
+            system_append=prompts.system_append(str(harness.SCRIPTS), triage=bool(triage)),
+            triage_token=triage,
+        )
+
+    return make
+
+
 def record(decision: Decision) -> None:
     """Write an approver's decision to the incident's audit log."""
     harness.audit.record_chat_decision(
@@ -90,8 +138,10 @@ def build(config: Config) -> Gateway:
         extra["runner_password"] = config.runner_auth[1]
     secrets = harness.outbound_secrets(extra=extra, names=config.credential_names())
 
-    def driver_factory(ask: AskPermission, triage: str | None) -> SdkDriver:
+    def sdk_factory(ask: AskPermission, triage: str | None) -> SdkDriver:
         return SdkDriver(lambda resume, can_use: agent_options(config, resume, can_use, triage), ask)
+
+    driver_factory = pi_driver_factory(config) if config.agent == "pi" else sdk_factory
 
     settings = Settings(
         hub=config.hub,
@@ -133,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load()
         harness.chat_policy.rules(config.chat)
+        problems = pi_problems(config) if config.agent == "pi" else []
+        if problems:
+            raise ConfigError("; ".join(problems))
     except (ConfigError, ValueError) as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
@@ -141,7 +194,8 @@ def main(argv: list[str] | None = None) -> int:
         state = "none" if not runner else f"{'enabled' if runner['enabled'] else 'disabled'}, source {runner['source']}"
         print(
             f"ok: site {config.doc['site']['name']}, {len(config.responders)} responder(s), "
-            f"{len(config.approvers)} approver(s), runner {state}, plugin {harness.PLUGIN_ROOT}"
+            f"{len(config.approvers)} approver(s), runner {state}, agent {config.agent} "
+            f"(model {config.model or 'default'}), plugin {harness.PLUGIN_ROOT}"
         )
         return 0
     asyncio.run(serve(config))
