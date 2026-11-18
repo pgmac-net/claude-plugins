@@ -14,6 +14,10 @@ from typing import Any
 DASHBOARD_UID = "sre-harness-slos"
 DATASOURCE = {"type": "prometheus", "uid": "${datasource}"}
 ROW_HEIGHT = 8
+HEADER_HEIGHT = 3
+# The plugin's public icon. A plain markdown image, at the size of the file, so Grafana's HTML
+# sanitiser has no size attribute to drop.
+ICON_URL = "https://raw.githubusercontent.com/pgmac-net/claude-plugins/main/plugins/sre-harness/assets/icon-64.png"
 
 
 def _seconds(duration: str) -> int:
@@ -141,12 +145,29 @@ def _panels_for(slo: Any, y: int, ids: list[int]) -> list[dict]:
     return panels
 
 
+def _header() -> dict:
+    """The icon and one line of purpose, above every row."""
+    return {
+        "type": "text",
+        "title": "",
+        "transparent": True,
+        "gridPos": {"h": HEADER_HEIGHT, "w": 24, "x": 0, "y": 0},
+        "options": {
+            "mode": "markdown",
+            "content": f"![SRE harness]({ICON_URL}) &nbsp; **SRE harness**: service level objectives for the services "
+            "that have one, read from the site's journeys.",
+        },
+    }
+
+
 def build(slos: list[Any], title: str = "SRE harness: SLOs") -> dict[str, Any]:
-    """The dashboard model: one row per SLO, budget-spending SLOs first."""
+    """The dashboard model: an icon header, then one row per SLO, budget-spending SLOs first."""
     ordered = sorted(slos, key=lambda s: (not s.budget, s.service, s.name))
-    panels: list[dict] = []
-    ids: list[int] = []
-    y = 0
+    header = _header()
+    header["id"] = 1
+    panels: list[dict] = [header]
+    ids: list[int] = [1]
+    y = HEADER_HEIGHT
     for slo in ordered:
         panels.extend(_panels_for(slo, y, ids))
         y += 1 + ROW_HEIGHT

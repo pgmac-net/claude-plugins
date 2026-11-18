@@ -1,3 +1,5 @@
+<img src="../assets/icon-128.png" alt="SRE harness icon" width="96" align="right">
+
 # sre-gateway
 
 Chat-ops for the sre-harness plugin. People start, question and hand over an incident in Slack. An agent works it with the plugin's `start-incident` skill, and any command that isn't pre-approved waits for an approver's click.
@@ -56,7 +58,7 @@ The allow-list is not a sandbox. Claude Code itself lets a fixed set of read-onl
 
 Needs `uv`, the `gh` CLI signed in, `kubectl` if the agent should read a cluster, and a checkout of the site repository. The Claude Code CLI comes bundled with the Agent SDK.
 
-1. **The Slack app.** Create it from [`slack-app-manifest.yaml`](slack-app-manifest.yaml) and install it to the workspace. Create an app-level token with `connections:write`. Invite the bot to the hub channel.
+1. **The Slack app.** Create it from [`slack-app-manifest.yaml`](slack-app-manifest.yaml) and install it to the workspace. Create an app-level token with `connections:write`. Upload [`../assets/icon-1024.png`](../assets/icon-1024.png) as the app icon (Basic Information > Display Information; a manifest cannot carry an icon). Invite the bot to the hub channel.
 2. **The Claude token.** Run `claude setup-token` on a machine where you are signed in to Claude.
 3. **Site configuration.** Fill in `chat` in `site.yaml` (schema v4) with the hub channel ID and the responder and approver user IDs, and run `validate_site.py`.
 4. **Environment file.** Create `~/.config/sre-harness/gateway.env`, mode 0600:

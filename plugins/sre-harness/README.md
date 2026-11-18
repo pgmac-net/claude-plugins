@@ -1,3 +1,5 @@
+<img src="assets/icon-128.png" alt="SRE harness icon" width="96" align="right">
+
 # sre-harness
 
 A portable harness for doing SRE work with an LLM agent: service catalog, incident triage and remediation, audit, user journeys and SLOs.
@@ -226,6 +228,7 @@ uv run scripts/trends.py [--as-of YYYY-MM-DD] [--pirs <dir>] [--json]
 | `adapters/pi/sre-audit.ts` | Pi extension: feeds Pi's tool calls to the audit hook, recording `agent: pi` and the model |
 | `docs/supported-agents.md` | Which agents and models have run the alert drill, step by step: the supported floor |
 | `templates/site-repo/` | Starter layout for a new site repository |
+| `assets/` | The icon: `icon.svg` is the source, `icon-<size>.png` the renders, and `render.py` regenerates them. Slack takes `icon-1024.png` |
 | `docs/adr/` | Design decisions |
 | `CONTEXT.md` | Glossary |
 
