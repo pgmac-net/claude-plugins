@@ -166,6 +166,11 @@ def _segments(command: str) -> list[list[str]] | None:
     return [segment for segment in segments if segment]
 
 
+def command_segments(command: str) -> list[list[str]] | None:
+    """The simple commands in a shell line, split at unquoted operators; None if it cannot be parsed."""
+    return _segments(command)
+
+
 def _is_harness_call(tokens: list[str]) -> bool:
     """True only for a plain call of one of this plugin's own scripts.
 
