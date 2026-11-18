@@ -153,6 +153,8 @@ def _segments(command: str) -> list[list[str]] | None:
     """Split a command into simple commands at unquoted shell operators. None if it cannot be parsed."""
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    # bash starts a comment only at the start of a word; shlex would end the line at any "#" and hide what follows.
+    lexer.commenters = ""
     try:
         tokens = list(lexer)
     except ValueError:

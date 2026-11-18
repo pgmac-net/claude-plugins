@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import audit
 import chat_policy
 import pytest
 import tool_policy
@@ -155,6 +156,27 @@ def test_a_glob_pattern_that_escapes_is_judged_where_it_leads(chat, home):
 )
 def test_more_shell_shapes(chat, home, command, expected):
     assert bash(chat, command, home / "site") == expected
+
+
+def test_a_hash_inside_a_word_hides_nothing(chat, home):
+    """bash reads 'x#;rm' as the word 'x#' then ';': shlex must not treat '#' as a comment there."""
+    assert bash(chat, "gh issue view x#;rm -rf /", home / "site") == ASK
+    assert bash(chat, f'{HARNESS}/timeline.py add --type update --text "see #241"', home / "site") == ALLOW
+    assert audit.is_mutation("ls x#; rm -rf /tmp/y")
+
+
+def test_a_search_over_files_denied_anywhere_asks(chat, home):
+    site = home / "site"
+    assert path_call(chat, "grep", site, site) == ALLOW
+    (site / "deploy").mkdir()
+    (site / "deploy" / "prod.env").write_text("TOKEN=x\n", encoding="utf-8")
+    assert path_call(chat, "grep", site, site) == ASK
+    assert path_call(chat, "grep", site / "catalog", site) == ALLOW
+
+
+@pytest.mark.parametrize("pattern", ["{/etc,x}/*", "[/]etc/*", "**/{a,b}.yaml"])
+def test_brace_and_bracket_globs_ask(chat, home, pattern):
+    assert tool_policy.decide(chat, "find", {"pattern": pattern}, home / "site").decision == ASK
 
 
 def test_mcp_and_other_tools_need_a_rule_naming_them(chat, home):

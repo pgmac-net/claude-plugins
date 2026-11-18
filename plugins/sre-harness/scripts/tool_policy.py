@@ -49,6 +49,8 @@ WRITE_TOOLS = frozenset({"Edit", "Write"})
 # Anything that makes one shell command do more than run one program with literal arguments.
 UNSAFE_SHELL = re.compile(r"[`$\n\r]")
 OPERATOR_CHARS = frozenset(";&|<>()")
+# A search whose tree is bigger than this cannot be checked for deny-anywhere files, so it asks.
+SEARCH_SCAN_LIMIT = 20000
 RULE = re.compile(r"^(?P<tool>[A-Za-z_][\w-]*)(?:\((?P<content>.*)\))?$", re.DOTALL)
 
 
@@ -121,6 +123,7 @@ def _has_operator(command: str) -> bool:
     """Whether any unquoted shell operator appears, even one that leaves a single command ('cmd &')."""
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    lexer.commenters = ""
     try:
         return any(token and set(token) <= OPERATOR_CHARS for token in lexer)
     except ValueError:
@@ -227,6 +230,33 @@ def _path_matches(rule: Rule, path: Path, home: Path) -> bool:
     return bool(regex.fullmatch(text) or regex.fullmatch(text + "/"))
 
 
+def _contains_denied(root: Path, regex: re.Pattern[str]) -> bool | None:
+    """Whether anything under root matches a deny pattern that can sit anywhere; None if the tree is too big to say."""
+    seen = 0
+    for directory, dirs, files in os.walk(root):
+        for name in [*dirs, *files]:
+            seen += 1
+            if seen > SEARCH_SCAN_LIMIT:
+                return None
+            if regex.fullmatch(os.path.join(directory, name)):
+                return True
+    return False
+
+
+def _search_problem(policy: Policy, rule: Rule, path: Path, tool_input: dict[str, Any]) -> str | None:
+    """Why a recursive search from path could reach what a deny rule protects; None if it cannot."""
+    pattern = tool_input.get("pattern")
+    if isinstance(pattern, str) and re.search(r"[{\[]", pattern):
+        return "glob patterns with braces or brackets need approval"
+    root = _literal_root(rule.content or "", policy.home)
+    if root is not None:
+        return f"the search covers {root}, which is denied" if root == path or path in root.parents else None
+    found = _contains_denied(path, _path_regex(rule.content or "", policy.home)) if path.is_dir() else False
+    if found is None:
+        return f"too many files under {path} to check against {rule.tool}({rule.content})"
+    return f"{path} contains files that {rule.tool}({rule.content}) denies" if found else None
+
+
 def _judge_path_tool(policy: Policy, tool: str, tool_input: dict[str, Any], cwd: Path) -> Verdict:
     path = _target(tool_input, cwd)
     # Read rules protect a path from editing too; Edit rules only from editing.
@@ -237,9 +267,9 @@ def _judge_path_tool(policy: Policy, tool: str, tool_input: dict[str, Any], cwd:
                 continue
             if _path_matches(rule, path, policy.home):
                 return Verdict(DENY, f"denied by {rule.tool}({rule.content or ''})")
-            root = _literal_root(rule.content or "", policy.home) if tool in SEARCH_TOOLS else None
-            if root is not None and (root == path or path in root.parents):
-                return Verdict(ASK, f"the search covers {root}, which is denied")
+            problem = _search_problem(policy, rule, path, tool_input) if tool in SEARCH_TOOLS else None
+            if problem:
+                return Verdict(ASK, problem)
     for rule in policy.allow:
         if rule.tool == tool and _path_matches(rule, path, policy.home):
             return Verdict(ALLOW, f"allowed by {tool}{'' if rule.content is None else f'({rule.content})'}")
