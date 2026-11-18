@@ -92,6 +92,38 @@ Needs `uv`, the `gh` CLI signed in, `kubectl` if the agent should read a cluster
 
 Upgrade by moving the plugin checkout to a new tag or commit, running `uv sync --frozen --no-dev`, and restarting the service.
 
+## Running on Pi
+
+The gateway runs Claude Code by default. It can run [Pi](https://pi.dev) instead, for chat incidents and unattended triage alike (ADR 0021). One agent serves every session of a gateway.
+
+**What changes:**
+- Pi has no permission system. The extension `adapters/pi/sre-policy.ts` sends every tool call to the gateway, which judges it with a **strict matcher** (`scripts/tool_policy.py`) against the same chat or triage-only rules Claude Code gets. A denied call is refused, an allowed one runs, and anything else becomes an approval request (refused in a triage-only session).
+- The matcher is stricter than Claude Code. A shell command runs without asking only if it is one plain command starting with an allow rule's prefix, with no chaining, pipe, redirect, `$`, backtick or newline. Claude Code's built-in read-only commands such as `cat` are not exempt: under Pi they raise approval requests.
+- Pi runs from its own home, `~/.config/sre-harness/pi` (`PI_CODING_AGENT_DIR`), with only the harness's skills, the audit and policy extensions, and the tools read, bash, grep, find, ls, edit and write. Codemode and tool search are off, and MCP tools are exposed directly. Sessions live under the gateway's state directory.
+- Nagios comes from a local stdio `nagios-mcp`, reading the base of `runner.status_url` with the runner's read-only login. The gateway writes that login to `~/.config/sre-harness/pi/nagios-mcp.json` (mode 0600, under the deny-list) at each start; it never enters the agent's environment. Stdio and HTTP servers from `SRE_GATEWAY_MCP_CONFIG` carry over; SSE-only servers are left out with a warning.
+
+**Switching on:**
+1. Install Pi, and `nagios-mcp` on the gateway's `PATH` (or name it in `SRE_GATEWAY_NAGIOS_MCP`).
+2. Install the model provider into the gateway's Pi home, and sign in if the provider needs it:
+
+   ```bash
+   PI_CODING_AGENT_DIR=~/.config/sre-harness/pi pi install npm:pi-claude-bridge
+   ```
+
+   A package's extensions load in every session, so install only providers.
+3. Add to `gateway.env`:
+
+   ```
+   SRE_GATEWAY_AGENT=pi
+   SRE_GATEWAY_MODEL=claude-bridge/claude-sonnet-5-5   # provider/id, required for Pi
+   # optional: SRE_GATEWAY_PI=/path/to/pi   SRE_GATEWAY_PI_HOME=…   SRE_GATEWAY_NAGIOS_MCP=…
+   ```
+
+4. Run `sre-gateway --check`. It names the agent and model. It refuses Pi without a `provider/id` model, without a `pi` binary, or (with a runner) without the read-only Nagios login.
+5. Run a drill (`/incident drill alert <host> <text>`), then check `audit.py verify`: records say `agent: pi`.
+
+Switch back by removing `SRE_GATEWAY_AGENT` and restarting. Sessions in progress are not carried across agents.
+
 ## Operating it
 
 - **Logs:** `journalctl --user -u sre-gateway`; add `-v` to `ExecStart` for the agent's stderr.
@@ -113,6 +145,9 @@ Upgrade by moving the plugin checkout to a new tag or commit, running `uv sync -
 | An unattended triage changes something | Triage-only rules deny record changes and pre-approved actions; every other call is refused without asking and logged | Claude Code's own read-only commands still run, as in every session |
 | Alert text instructs the agent | The agent is told alert output is evidence; the triage-only policy bounds what any instruction could do | A misled triage can propose a bad fix; a person approves every change |
 | An alert storm floods chat or spends the usage window | One triage per poll; alerts join an open incident; per-service cooldown | Each poll that finds new problems with no incident open can still start one triage |
+| Under Pi, the agent runs a call the policy did not judge | Every call goes through the policy extension, which blocks unless the gateway answers allow; no answer, a cancelled dialog or an unreadable answer blocks. Codemode is off, so no call is hidden inside a script | The extension runs inside Pi. A Pi bug that skips `tool_call` events would skip the policy too |
+| Under Pi, a command slips past the allow-list | Strict matcher: one plain command only, deny rules checked on every part, paths resolved through symlinks, a search that could reach a denied file asks first | It asks more often than Claude Code; approvers see more requests |
+| Under Pi, a chat message runs a Pi command | A message starting with `/` is passed as text | — |
 | Unreviewed text on a public tracker | Triage records open in a private repository; only a responder's `promote` makes one public, carrying conclusions, not evidence | — |
 
 ## Development

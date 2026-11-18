@@ -44,3 +44,5 @@ Pi loads these skills through this repository's `package.json`, or through `skil
 It sends each tool call to `scripts/audit_hook.py` as a Claude Code hook would, with `agent: pi` and the model, and never blocks a call. It records nothing outside an incident.
 
 For monitoring access, configure the site's MCP servers in Pi's MCP configuration, read-only tools only.
+
+The chat gateway can also run Pi itself, with the chat policy and approvals applied through `adapters/pi/sre-policy.ts`: see "Running on Pi" in `gateway/README.md` (ADR 0021). That extension only works under the gateway; outside it, it blocks every call.

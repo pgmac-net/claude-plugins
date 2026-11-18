@@ -23,6 +23,7 @@ Every row runs the same alert drill: an unattended triage of a made-up alert, an
 |---|---|---|---|---|---|---|---|---|---|
 | Claude Code (gateway) | Claude (default) | pass | pass | pass | pass | pass | pass | pass | hook |
 | Pi 1.5 | claude-bridge/claude-sonnet-5-5 | pass | pass | pass | partial | pass | pass | pass | hook |
+| Pi 1.5 (gateway) | claude-bridge/claude-sonnet-5-5 | pass | pass | pass | partial | pass | pass | pass | hook |
 | Pi 1.5 | opencode-go/kimi-k3 | not run | | | | | | | |
 | Pi 1.5 + pi-llama | Qwen3-8B Q4_K_M (self-hosted, CPU) | pass | **fail** | | | | | | hook |
 | Codex | | not run | | | | | | | |
@@ -37,6 +38,12 @@ Notes:
   - 2 discovery entries and 1 summary.
   - Audit: 27 records, all `agent: pi`, `capture: hook`, chain intact, none incomplete. The two flagged "mutations" are the two blocked attempts, which never ran.
   - Two earlier runs found faults in the proof guard, not the harness: `catalog-39` and `catalog-40`.
+- **Pi + Sonnet behind the gateway**, 2026-11-19, drill record `catalog-51` (ADR 0021):
+  - Run on a workstation: the real gateway code with an in-memory chat, and the real `pi --mode rpc`.
+  - A drill alert started a triage-only session. It opened a private record with `--auto`, read the cluster with `kube_read.py`, and posted a ranked proposal without changing anything.
+  - No Nagios MCP server was available on the workstation, so host disk evidence was missing ("partial").
+  - A responder's first message moved the session to the chat policy, on the record. `ls -la /tmp` raised one approval request bound to that call, which ran once approved. The agent then dismissed the record when asked.
+  - Audit: 25 records, 23 of them `agent: pi`, `capture: hook`, chain intact, one approval and one policy change. The log is committed to the site repository.
 - **kimi-k3**: the provider refuses without an OpenCode Go subscription (403).
 - **Qwen3-8B, self-hosted**, 2026-11-17:
   - It found the skill.
@@ -50,9 +57,9 @@ Notes:
 
 - **Skills.** Pi loads them from this repository (`package.json`) or with `--skill <plugin>/skills`. Pi keeps the first skill of a given name, so if `pgmac-workflows` is also loaded, name the sre-harness skill by its path. Agents without skills follow `AGENTS.md`.
 - **Audit.** For Pi, load `adapters/pi/sre-audit.ts`: records are `capture: hook`, `agent: pi`, with the model. Other agents self-report with `audit.py record --agent … --model …`.
-- **Guard.** Pi asks no one before running a command. For drills, load a guard extension that blocks mutating commands; the proof runs used one built on the same patterns as `audit.py`'s mutation check. Never point an unattended Pi session at a live incident.
-- **Monitoring.** Pi speaks only streamable-HTTP MCP. If a site's monitoring MCP server offers only SSE (as this site's Nagios MCP does), Pi uses the site's documented fallbacks and the harness scripts, such as `slo.py status` and `kube_read.py`.
-- **Unattended triage.** Claude Code only, through the gateway (ADR 0020).
+- **Guard.** Pi asks no one before running a command. Behind the chat gateway, `adapters/pi/sre-policy.ts` sends every call to the gateway, which applies the chat policy and approvals (ADR 0021). Outside the gateway, for drills, load a guard extension that blocks mutating commands; the proof runs used one built on the same patterns as `audit.py`'s mutation check. Never point an unattended Pi session at a live incident except through the gateway.
+- **Monitoring.** Pi speaks only stdio and streamable-HTTP MCP. If a site's monitoring MCP server offers only SSE, run it as a local stdio server instead: the gateway does this for Nagios with the runner's read-only login. Otherwise Pi uses the site's documented fallbacks and the harness scripts, such as `slo.py status` and `kube_read.py`.
+- **Unattended triage.** Through the gateway, on Claude Code (the default) or on Pi with `SRE_GATEWAY_AGENT=pi` (ADR 0021).
 
 ## Self-hosted models
 

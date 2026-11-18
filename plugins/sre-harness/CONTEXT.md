@@ -260,6 +260,14 @@ _Avoid_: Auto-remediation, bot incident, autopilot
 The tool policy of an unattended triage: read-only, plus opening its own private record and writing its timeline. Every other call is refused without asking anyone.
 _Avoid_: Read-only mode, safe mode
 
+**Gateway agent**:
+The one agent a chat gateway runs for every session, Claude Code or Pi, set by `SRE_GATEWAY_AGENT`.
+_Avoid_: Backend, engine, runtime
+
+**Strict matcher**:
+The gateway's own judge of a tool call against the chat policy's rules, used for an agent with no permission system (Pi): allow, deny, or ask when it cannot be sure.
+_Avoid_: Policy engine, firewall, sandbox
+
 **Policy change**:
 The one-way move of a session from the triage-only policy to the chat policy, made when a responder first speaks, and recorded in the audit log.
 _Avoid_: Handover (that is a timeline entry), escalation
