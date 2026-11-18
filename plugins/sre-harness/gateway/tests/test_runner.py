@@ -257,3 +257,9 @@ def test_triage_prompt_is_only_for_triage():
     assert "UNATTENDED TRIAGE" in prompts.system_append("/s", triage=True)
     assert "UNATTENDED TRIAGE" not in prompts.system_append("/s")
     assert "open --auto" in prompts.system_append("/s", triage=True)
+
+
+def test_the_alert_message_itself_says_to_open_privately():
+    """A responder may speak before the agent starts: the triage rules are gone by then, the message is not."""
+    message = prompts.alert_message(["web01/HTTP is CRITICAL"], drill=False)
+    assert "incident.py open --auto" in message and "even if a responder has already spoken" in message
