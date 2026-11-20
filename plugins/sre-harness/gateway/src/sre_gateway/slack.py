@@ -151,6 +151,108 @@ def to_mrkdwn(text: str) -> str:
     return "\n".join(out)
 
 
+# Slack's native `markdown` block renders tables, quotes, strikethrough and links itself, so
+# agent prose goes to it nearly as written. What the gateway still decides is what the text
+# may do: it cannot mention anyone, and a link is clickable only on a host the site allows.
+MARKDOWN_BLOCK_LIMIT = 12_000  # Slack's cumulative limit for markdown blocks in one payload.
+ZERO_WIDTH = "\u200b"
+URL_TRAILING = ".,;:!?)"
+
+
+def link_allowed(url: str, hosts: frozenset[str]) -> bool:
+    """https only, no credentials in the URL, and the host is listed ('*.x.com' = subdomains of x.com)."""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return False
+    if parsed.scheme != "https" or "@" in parsed.netloc or not host:
+        return False
+    return host in hosts or any(entry.startswith("*.") and host.endswith(entry[1:]) for entry in hosts)
+
+
+def _inline_link(text: str, start: int, hosts: frozenset[str]) -> tuple[int, str] | None:
+    """A '[label](url)' at text[start], as (end, replacement). Unlisted hosts lose the link, not the URL."""
+    mid = text.find("](", start)
+    if mid < 0:
+        return None
+    label = text[start + 1 : mid]
+    if "[" in label or "]" in label:
+        return None
+    close = text.find(")", mid + 2)
+    if close < 0:
+        return None
+    parts = text[mid + 2 : close].split()
+    if not parts:
+        return None
+    url = parts[0]
+    if link_allowed(url, hosts):
+        return close + 1, f"[{label}]({url})"
+    return close + 1, f"{label} (`{url.replace('`', '')}`)"
+
+
+def _prose(text: str, hosts: frozenset[str]) -> str:
+    """Prose outside code: no mention syntax, links only to listed hosts. One linear scan."""
+    out: list[str] = []
+    index, size = 0, len(text)
+    while index < size:
+        char = text[index]
+        if char == "[":
+            found = _inline_link(text, index, hosts)
+            if found:
+                if out and out[-1] == "!":
+                    out.pop()  # an image is only ever a link here
+                index, replacement = found
+                out.append(replacement)
+                continue
+            after = text.find("]", index) + 1
+            if after and text[after : after + 1] in (":", "["):
+                out.append("\\")  # a reference-style link or definition
+        elif text.startswith(("http://", "https://"), index):
+            end = index
+            while end < size and not text[end].isspace():
+                end += 1
+            url = text[index:end]
+            while url and url[-1] in URL_TRAILING:
+                url = url[:-1]
+            end = index + len(url)
+            out.append(url if link_allowed(url, hosts) else f"`{url.replace('`', '')}`")
+            index = end
+            continue
+        elif char == "<":
+            out.append(char + ZERO_WIDTH)  # '<@U1>', '<!here>', '<#C1>' and '<url|text>' stop parsing
+            index += 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _line(line: str, hosts: frozenset[str]) -> str:
+    if len(line) > MAX_CONVERTED_LINE:
+        # Too long to scan cheaply: break everything that could be a mention or a link.
+        return line.replace("<", "<" + ZERO_WIDTH).replace("[", "\\[").replace("http", "http" + ZERO_WIDTH)
+    parts = line.split("`")
+    for index, part in enumerate(parts):
+        unclosed = index == len(parts) - 1 and len(parts) % 2 == 0
+        if index % 2 == 0 or unclosed:
+            parts[index] = _prose(part, hosts)
+    return "`".join(parts)
+
+
+def to_markdown_block(text: str, hosts: frozenset[str] = frozenset()) -> str:
+    """The agent's Markdown for Slack's `markdown` block. Code, fenced or inline, is left alone."""
+    out: list[str] = []
+    in_code = False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            in_code = not in_code
+            out.append(line)
+        else:
+            out.append(line if in_code else _line(line, hosts))
+    return "\n".join(out)
+
+
 def _request_blocks(view: ApprovalView, footer: str, buttons: bool) -> list[dict[str, Any]]:
     """The request. What will run is a literal preformatted block: nothing in it can format, mention or link.
 
@@ -206,7 +308,9 @@ def _request_blocks(view: ApprovalView, footer: str, buttons: bool) -> list[dict
 
 
 class SlackAdapter:
-    def __init__(self, bot_token: str, app_token: str):
+    def __init__(self, bot_token: str, app_token: str, link_hosts: frozenset[str] = frozenset()):
+        self._link_hosts = frozenset(host.lower() for host in link_hosts)
+        self._block_refused: set[str] = set()
         self._app = AsyncApp(token=bot_token)
         self._bot_token = bot_token
         self._app_token = app_token
@@ -311,18 +415,47 @@ class SlackAdapter:
         async def _error(error: Exception) -> None:
             log.error("Slack handler failed: %s", type(error).__name__)
 
+    def _markdown_blocks(self, text: str) -> list[dict[str, Any]] | None:
+        """The text as one `markdown` block, or None when it is too long for one."""
+        body = to_markdown_block(text, self._link_hosts)
+        return [{"type": "markdown", "text": body}] if 0 < len(body) <= MARKDOWN_BLOCK_LIMIT else None
+
+    def _note_refused(self, exc: SlackApiError) -> None:
+        reason = str(exc.response.get("error"))
+        if reason not in self._block_refused:
+            self._block_refused.add(reason)
+            log.warning("Slack refused a markdown block (%s); sending that message as plain text", reason)
+
     async def post(self, place: Place, text: str, raw: bool = False) -> Posted:
-        reply = await self._client.chat_postMessage(
-            channel=place.channel,
-            thread_ts=place.thread,
-            text=to_mrkdwn(text) if raw else escape(to_mrkdwn(text)),
-            unfurl_links=False,
-            unfurl_media=False,
-        )
+        fallback = to_mrkdwn(text) if raw else escape(to_mrkdwn(text))
+        blocks = None if raw else self._markdown_blocks(text)
+        args: dict[str, Any] = {
+            "channel": place.channel,
+            "thread_ts": place.thread,
+            "text": fallback,
+            "unfurl_links": False,
+            "unfurl_media": False,
+        }
+        try:
+            reply = await self._client.chat_postMessage(**args, **({"blocks": blocks} if blocks else {}))
+        except SlackApiError as exc:
+            if not blocks:
+                raise
+            self._note_refused(exc)
+            reply = await self._client.chat_postMessage(**args)
         return Posted(reply["channel"], reply["ts"])
 
     async def update(self, posted: Posted, text: str) -> None:
-        await self._client.chat_update(channel=posted.channel, ts=posted.ts, text=escape(to_mrkdwn(text)))
+        fallback = escape(to_mrkdwn(text))
+        blocks = self._markdown_blocks(text)
+        try:
+            # Blocks stay on a message until replaced, so a text-only edit sends an empty list.
+            await self._client.chat_update(channel=posted.channel, ts=posted.ts, text=fallback, blocks=blocks or [])
+        except SlackApiError as exc:
+            if not blocks:
+                raise
+            self._note_refused(exc)
+            await self._client.chat_update(channel=posted.channel, ts=posted.ts, text=fallback, blocks=[])
 
     async def delete(self, posted: Posted) -> None:
         await self._client.chat_delete(channel=posted.channel, ts=posted.ts)

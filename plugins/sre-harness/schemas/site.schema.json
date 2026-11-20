@@ -163,6 +163,15 @@
           "default": 2,
           "description": "Agent sessions that may run at once."
         },
+        "link_hosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+          },
+          "description": "Hosts whose links stay clickable in chat messages, such as github.com or *.grafana.net (a leading *. means any subdomain). Any other link is shown as its address in code. Empty or absent: no link is clickable."
+        },
         "attachments": {
           "type": "object",
           "additionalProperties": false,

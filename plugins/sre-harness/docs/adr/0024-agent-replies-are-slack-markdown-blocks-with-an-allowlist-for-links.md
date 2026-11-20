@@ -1,0 +1,19 @@
+# The gateway sends agent replies as Slack markdown blocks and decides which links stay clickable
+
+Agent replies used to go to Slack as plain `text`, with the gateway converting Markdown to Slack's own syntax and escaping `&`, `<` and `>` (homelabia#280). Bold and headings survived, a table became a fixed-width block, and everything else was lost: a link was never clickable, `*italic*` showed as bold, and `~~strike~~` and `> quotes` did not render. This records how replies are sent now.
+
+**Prose goes in a native `markdown` block.** Slack's `markdown` block renders headings, bold, italic, strikethrough, lists, quotes, code, links and real tables, so the agent's Markdown passes through almost as written and the converter that rebuilt it as Slack syntax is no longer on this path. The block's `text` limit is 12,000 characters across a payload. The message's `text` field still carries the old escaped conversion: it is what notifications and clients without blocks show, and what is sent alone when the block cannot be used.
+
+**The block is optional, and falls back to text.** A reply over the limit, or one Slack refuses (`invalid_blocks` and the like), is sent as the text it always was. The first refusal for each reason is logged once. An edit sends `blocks: []` when it falls back, because Slack keeps the blocks of a message until they are replaced. Replies longer than the limit are not split into several messages; that was left out because the fallback is what people already see.
+
+**What the agent's text may do is still the gateway's decision.** Agent text is untrusted: it repeats alert text, log lines and attachments. In plain `text` the escaping made mentions and links impossible. A `markdown` block has no such guarantee, and Slack does not say whether `<@U1>`, `<!channel>` or `<url|text>` are read inside one. So the gateway does not rely on Slack's answer:
+
+- A `<` outside code is followed by a zero-width space, so no mention, channel, broadcast or `<url|text>` can form, whichever way Slack parses it.
+- A Markdown link is clickable only when the URL is `https`, carries no credentials and its host is in `chat.link_hosts` in `site.yaml` (`github.com`, or `*.grafana.net` for any subdomain). Any other link is rewritten to `label (`url`)`, so the address is visible and nothing is disguised behind a label. A bare URL off the list goes in inline code. Images are links. Reference-style links are defused with a backslash. The list is empty by default, so a site that has not set it gets no clickable links, which is what it had before.
+- Code, fenced or inline, is not touched: Slack does not parse it, and a zero-width space inside a command people copy would be a trap. A line over 2,000 characters is not scanned; it gets every `<`, `[` and `http` broken instead.
+
+The scan is linear and uses no backtracking pattern, as `to_mrkdwn` was written, because the text is hostile input.
+
+**Left as they were.** Approval requests (their own blocks, with the command in a preformatted block), and the gateway's own messages that carry `<#C1>` and `<url|text>` (`raw=True`), which are written by the gateway and are never agent text.
+
+**Not verified against Slack.** The plan called for a test in a Slack channel first: mention and `<url|text>` parsing inside a markdown block, `chat.update` with one, nested lists. It was not run, because the build had no Slack workspace to try it in. The design does not depend on the results: mentions are broken on the way in, and a refused block or edit falls back. The first deployment should check an edit (the working indicator edits its message) and a table.

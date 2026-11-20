@@ -250,6 +250,10 @@ _Avoid_: Read-only mode (that is the triage-only policy's avoided name too), Q&A
 A snippet or text file a responder sends with a chat message, read by the gateway within the site's size limits, redacted and given to the agent as untrusted data; the tracking issue gets a description of it, never its content.
 _Avoid_: Upload, paste, file share (that is Slack's name for the message subtype)
 
+**Link allowlist**:
+The hosts in `chat.link_hosts` whose links stay clickable in the agent's chat replies; any other link is shown as its address in code, and with no list nothing is clickable.
+_Avoid_: Domain filter, URL whitelist
+
 **Question log**:
 The gateway's own record of one question: who asked, what, and every tool call and refusal, kept on the gateway host for 30 days and never committed.
 _Avoid_: Audit log (that belongs to an incident), transcript
