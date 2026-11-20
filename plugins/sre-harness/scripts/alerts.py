@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ipaddress
 import json
 import os
 import sys
@@ -130,6 +131,27 @@ def credentials(doc: dict[str, Any], env: dict[str, str] | None = None) -> tuple
     return user, password
 
 
+def is_loopback_url(url: str) -> bool:
+    """True when the URL's literal host is loopback: localhost, 127.0.0.0/8 or ::1. Never resolves names."""
+    host = (urllib.parse.urlsplit(url).hostname or "").rstrip(".").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def cleartext_login_problem(url: str) -> str | None:
+    """Why a login must not be sent to this URL, or None. Call it only when credentials are configured."""
+    if urllib.parse.urlsplit(url).scheme.lower() == "http" and not is_loopback_url(url):
+        return (
+            "the alert-source login would cross the network in clear text; "
+            "use https, or a loopback host (127.0.0.0/8, ::1, localhost)"
+        )
+    return None
+
+
 def fetch(url: str, query: str, auth: tuple[str, str] | None, timeout: float = STATUS_TIMEOUT) -> dict[str, Any]:
     """One statusjson.cgi query, returning its 'data'."""
     status = "down+unreachable" if query == "hostlist" else "warning+critical+unknown"
@@ -137,6 +159,8 @@ def fetch(url: str, query: str, auth: tuple[str, str] | None, timeout: float = S
     params = urllib.parse.urlencode({"query": query, "details": "true", key: status}, safe="+")
     if not url.startswith(("https://", "http://")):
         raise SiteError("the runner's status URL must be http or https")
+    if auth and (problem := cleartext_login_problem(url)):
+        raise SiteError(problem)
     request = urllib.request.Request(f"{url}?{params}", headers={"Accept": "application/json"})  # noqa: S310
     if auth:
         token = base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode()

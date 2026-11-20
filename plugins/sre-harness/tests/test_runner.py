@@ -146,6 +146,60 @@ class TestSelect:
             alerts.credentials(doc, {"NAGIOS_USER": "u"})
 
 
+class FakeResponse:
+    """What urlopen hands back: a context manager with a JSON body."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return b'{"result": {"type_code": 0}, "data": {}}'
+
+
+class TestCleartextLogin:
+    OFF_HOST = "http://monitoring.example.com/cgi-bin/statusjson.cgi"
+    LOGIN = ("u", "p")
+
+    @pytest.fixture(autouse=True)
+    def sent(self, monkeypatch):
+        """Record the requests fetch would send, instead of sending them."""
+        requests = []
+
+        def fake_urlopen(request, timeout=None):  # pylint: disable=unused-argument
+            requests.append(request)
+            return FakeResponse()
+
+        monkeypatch.setattr(alerts.urllib.request, "urlopen", fake_urlopen)
+        return requests
+
+    def test_refuses_login_over_http_off_host(self, sent):
+        with pytest.raises(sre_common.SiteError, match="use https, or a loopback host"):
+            alerts.fetch(self.OFF_HOST, "hostlist", self.LOGIN)
+        assert not sent
+
+    @pytest.mark.parametrize("host", ["127.0.0.1:8080", "127.1.2.3", "[::1]:8080", "localhost", "LOCALHOST.:8080"])
+    def test_allows_login_over_http_to_loopback(self, sent, host):
+        alerts.fetch(f"http://{host}/cgi-bin/statusjson.cgi", "hostlist", self.LOGIN)
+        assert sent[0].get_header("Authorization")
+
+    @pytest.mark.parametrize("host", ["localhost.localdomain", "127.0.0.1.example.com", "203.0.113.5", "[::2]"])
+    def test_names_and_addresses_that_are_not_loopback_are_off_host(self, sent, host):
+        with pytest.raises(sre_common.SiteError, match="clear text"):
+            alerts.fetch(f"http://{host}/cgi-bin/statusjson.cgi", "hostlist", self.LOGIN)
+        assert not sent
+
+    def test_allows_http_off_host_without_a_login(self, sent):
+        alerts.fetch(self.OFF_HOST, "hostlist", None)
+        assert not sent[0].has_header("Authorization")
+
+    def test_allows_login_over_https_off_host(self, sent):
+        alerts.fetch(self.OFF_HOST.replace("http:", "https:"), "hostlist", self.LOGIN)
+        assert sent[0].get_header("Authorization")
+
+
 CHAT = {
     "adapter": "slack",
     "hub_channel": "C" + "0123456789",
@@ -172,6 +226,7 @@ class TestValidate:
             ({"source": "metrics"}, "only nagios"),
             ({"source": "nope"}, "not a monitoring source"),
             ({"password_env": None}, "go together"),
+            ({"status_url": "http://monitoring.example.com/cgi-bin/statusjson.cgi"}, "clear text"),
         ],
     )
     def test_bad_runner_settings(self, edit_site, change, message):
@@ -182,6 +237,33 @@ class TestValidate:
 
         errors = validate_site.validate(edit_site(mutate)).errors
         assert any(message in e for e in errors), errors
+
+    @staticmethod
+    def runner_errors(edit_site, runner_change=None, endpoint=None, drop_login=False):
+        def mutate(doc):
+            doc["chat"] = CHAT
+            doc["runner"] = {**RUNNER, **(runner_change or {})}
+            if drop_login:
+                doc["runner"].pop("user_env")
+                doc["runner"].pop("password_env")
+            if endpoint:
+                next(m for m in doc["monitoring"] if m["name"] == "alerts")["endpoint"] = endpoint
+
+        return [e for e in validate_site.validate(edit_site(mutate)).errors if "runner" in e]
+
+    def test_login_to_an_http_endpoint_off_host_is_an_error(self, edit_site):
+        errors = self.runner_errors(edit_site, endpoint="http://monitoring.example.com:8080")
+        assert any("runner/status_url" in e and "clear text" in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        "url", ["http://127.0.0.1:8080/cgi-bin/statusjson.cgi", "http://[::1]/cgi-bin/statusjson.cgi"]
+    )
+    def test_login_to_loopback_http_validates(self, edit_site, url):
+        assert not self.runner_errors(edit_site, {"status_url": url})
+
+    def test_http_off_host_without_a_login_validates(self, edit_site):
+        url = "http://monitoring.example.com/cgi-bin/statusjson.cgi"
+        assert not self.runner_errors(edit_site, {"status_url": url}, drop_login=True)
 
     def test_runner_needs_chat(self, runner_site):
         assert any("needs a chat section" in e for e in validate_site.validate(runner_site).errors)

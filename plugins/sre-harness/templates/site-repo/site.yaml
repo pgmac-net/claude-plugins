@@ -138,7 +138,7 @@ chat: {}
 #   enabled: false
 #   source: nagios                     # a monitoring entry of type nagios
 #   status_url: https://<nagios>/cgi-bin/statusjson.cgi   # if not <endpoint>/cgi-bin/statusjson.cgi
-#   user_env: NAGIOS_USER              # basic auth, read-only user; the agent never sees these
+#   user_env: NAGIOS_USER              # basic auth, read-only user; the agent never sees these. Sent only over https, or http to a loopback host (127.0.0.0/8, ::1, localhost)
 #   password_env: NAGIOS_PASS
 #   tiers: [1]
 #   tracker_repo: catalog

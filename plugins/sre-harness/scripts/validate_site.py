@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import alerts
 import autonomy
 import catalog_check
 import chat_policy
@@ -298,6 +299,12 @@ def check_runner(doc: dict[str, Any]) -> tuple[list[str], dict[str, Any] | None]
         )
     if bool(runner.get("user_env")) != bool(runner.get("password_env")):
         errors.append("runner: user_env and password_env go together")
+    elif runner.get("user_env"):
+        url = runner.get("status_url") or (
+            source["endpoint"].rstrip("/") + "/cgi-bin/statusjson.cgi" if source and source.get("endpoint") else ""
+        )
+        if url and (problem := alerts.cleartext_login_problem(url)):
+            errors.append(f"runner/status_url: {problem}")
     return errors, {
         "enabled": runner["enabled"],
         "source": runner["source"],
