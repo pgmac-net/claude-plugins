@@ -159,6 +159,7 @@ def build(config: Config) -> Gateway:
         max_sessions=config.max_sessions,
         state_dir=config.state_dir,
         question_idle_seconds=config.question_idle_seconds,
+        attachments=config.attachments,
     )
     return Gateway(
         settings,

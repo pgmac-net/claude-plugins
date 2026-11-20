@@ -31,6 +31,7 @@ oauth_config:
       - channels:read
       - channels:history    # read the hub channel, if it is public
       - users:read          # show approvers' names
+      - files:read          # read a snippet or text file a responder attaches (chat.attachments in site.yaml)
 settings:
   event_subscriptions:
     bot_events:

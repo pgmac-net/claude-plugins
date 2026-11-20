@@ -28,6 +28,18 @@ class Posted:
 
 
 @dataclass(frozen=True)
+class FileRef:
+    """A file or snippet a person attached. 'url' is the platform's own handle; only the adapter uses it."""
+
+    id: str
+    name: str
+    size: int
+    mimetype: str
+    snippet: bool
+    url: str
+
+
+@dataclass(frozen=True)
 class Incoming:
     """A message from a person. 'mentions_bot' is true when it addresses the gateway."""
 
@@ -37,6 +49,7 @@ class Incoming:
     ts: str
     thread: str | None = None
     mentions_bot: bool = False
+    files: tuple[FileRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -124,9 +137,16 @@ class ChatAdapter(Protocol):
     def channel_link(self, channel: str) -> str:
         """How to refer to a channel inside a message."""
 
+    async def download(self, file: FileRef, max_bytes: int) -> bytes:
+        """The file's bytes, at most max_bytes of them. Raises FileUnavailable, with a reason a person can read."""
+
 
 class NameTaken(Exception):
     """A channel with that name already exists."""
+
+
+class FileUnavailable(Exception):
+    """An attachment could not be fetched; the message is the reason shown to the person who sent it."""
 
 
 Notify = Callable[[str], Awaitable[None]]
