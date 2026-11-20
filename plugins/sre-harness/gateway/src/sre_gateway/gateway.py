@@ -14,6 +14,7 @@ import contextlib
 import logging
 import re
 import secrets
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,6 +60,7 @@ QUESTION_REFUSAL = (
 QUESTION_BUSY = "The agent sessions are busy with incident work; ask again later."
 QUESTION_PREEMPTED = "This question ended to free the agent for incident work. Ask again with `/sre`."
 QUESTION_ENDED = "This question has ended; ask again with `/sre`."
+RECLAIMED = "The agent stopped to free a session for other work. Your next message here resumes it."
 TRIAGE_REFUSAL = (
     "Refused without asking: this is an unattended triage, which may only read, keep its record and propose a fix. "
     "Do not retry; say in the summary what this would have checked or changed."
@@ -103,6 +105,8 @@ class Session:  # pylint: disable=too-many-instance-attributes
     indicator: Indicator | None = None
     # A question's turns so far, and its log; an incident has neither.
     turns: int = 0
+    # When the agent last finished a turn or started: the longest idle is reclaimed first.
+    idle_since: float = 0.0
     qlog: questions.QuestionLog | None = None
 
     @property
@@ -349,15 +353,39 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         await session.queue.put(prompts.question_message(name, text))
 
     def _question_room(self) -> bool:
-        """Whether a question may take an agent session: only if one is still left for incident work."""
-        return self._live + self._waiting + 1 < self.settings.max_sessions
+        """Whether a question may take an agent session: only if one is still left for incident work.
 
-    async def _preempt_question(self) -> None:
-        """End one idle question, so incident work that needs its session gets it now."""
-        for session in list(self.sessions.values()):
-            if session.question and session.driver is not None and not session.busy:
-                await self._end_question(session, QUESTION_PREEMPTED, "preempted")
-                return
+        An ended incident's idle agent does not count: a question may reclaim it.
+        """
+        busy = self._live - len(self._reclaimable(for_question=True))
+        return busy + self._waiting + 1 < self.settings.max_sessions
+
+    def _reclaimable(self, for_question: bool) -> list[Session]:
+        """Idle agents that hold a slot without doing work, in the order they are reclaimed.
+
+        Ended incidents first (their work is done), then, unless a question is asking, idle
+        questions (a person may still be asking); the longest idle first within each.
+        """
+        idle = [s for s in self.sessions.values() if s.driver is not None and not s.busy]
+        ended = [s for s in idle if s.conv.ended and not s.question]
+        asked = [] if for_question else [s for s in idle if s.question]
+        return sorted(ended, key=lambda s: s.idle_since) + sorted(asked, key=lambda s: s.idle_since)
+
+    async def _reclaim(self, for_question: bool) -> bool:
+        """Stop one reclaimable agent so other work can take its slot. False if there was none."""
+        found = self._reclaimable(for_question)
+        if not found:
+            return False
+        await self._release(found[0])
+        return True
+
+    async def _release(self, session: Session) -> None:
+        """Free a session's slot for waiting work: a question ends; an ended incident is parked, to resume later."""
+        if session.question:
+            await self._end_question(session, QUESTION_PREEMPTED, "preempted")
+            return
+        await self._park(session)
+        await self._say(session.place, RECLAIMED)
 
     async def _after_question_turn(self, session: Session) -> None:
         if session.conv.ended:
@@ -367,9 +395,6 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             await self._end_question(
                 session, f"This question reached its limit of {QUESTION_TURNS} turns. Ask again with `/sre`.", "turns"
             )
-        elif self._waiting:
-            # Incident work is waiting for this session's slot.
-            await self._end_question(session, QUESTION_PREEMPTED, "preempted")
 
     async def _end_question(self, session: Session, notice: str | None, reason: str) -> None:
         """Stop a question for good: its slot is freed, its thread answers only with a pointer to /sre."""
@@ -575,6 +600,9 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
                 await self.chat.close(indicator)
             if session.question:
                 await self._after_question_turn(session)
+            if self._waiting and session.driver is not None and (session.question or session.conv.ended):
+                # Work is waiting for a slot this session holds without needing it.
+                await self._release(session)
             if session.release_after_turn:
                 session.release_after_turn = False
                 await self._park(session)
@@ -615,13 +643,15 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         if session.conv.ended and session.question:
             return False
         if session.question:
-            # Checked with no await before the slot is taken, so two questions cannot both pass.
-            if not self._question_room():
+            # A question never waits: a slot left free, or one an ended incident holds idle, or none.
+            if self._question_room() and self._slots.locked():
+                await self._reclaim(for_question=True)
+            if not self._question_room() or self._slots.locked():
                 await self.chat.post(session.place, QUESTION_BUSY)
                 return False
         elif self._slots.locked():
-            # Incident work never waits behind a question that is only sitting idle.
-            await self._preempt_question()
+            # Incident work never waits behind an agent that is only sitting idle.
+            await self._reclaim(for_question=False)
             if self._slots.locked():
                 await self.chat.post(
                     session.place, "All agent sessions are in use; this one starts as soon as one is free."
@@ -645,6 +675,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             await self.chat.post(session.place, self._scrub(f"The agent did not start: {type(exc).__name__}: {exc}"))
             return False
         session.driver = driver
+        session.idle_since = time.monotonic()
         self._live += 1
         return True
 
@@ -666,6 +697,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
                 await self._on_event(session, event)
         finally:
             session.busy = False
+            session.idle_since = time.monotonic()
             self._save()
 
     async def _on_event(self, session: Session, event: object) -> None:
@@ -784,6 +816,10 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
 
     async def _incident_opened(self, session: Session, state: dict[str, Any]) -> None:
         conv = session.conv
+        if conv.ended and state.get("status") != "resolved":
+            # Working an open incident again: it takes alerts and is no longer reclaimable.
+            conv.ended = False
+            self._save()
         if conv.incident == state["id"]:
             return
         conv.incident, conv.title, conv.drill = state["id"], state.get("title", ""), bool(state.get("drill"))
