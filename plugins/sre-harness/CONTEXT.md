@@ -238,6 +238,14 @@ _Avoid_: Admin, owner
 A single-use, expiring chat message asking an approver to allow one tool call, stating the call and its blast radius.
 _Avoid_: Approval card, confirmation prompt
 
+**Working indicator**:
+The one line the chat gateway keeps as the last message of a conversation while its agent starts and works a turn, naming the activity from the tool's name (never its input) and the time taken; deleted when the turn ends.
+_Avoid_: Status message (the `status` command is something else), progress bar
+
+**Typing indicator**:
+The chat platform's own "is writing…" status for the gateway's bot, shown while the agent works and cleared just before each post and while an approval request waits. Best-effort: only where the platform has one, and in Slack only in a thread.
+_Avoid_: Typing event, presence
+
 **PIR**:
 A post-incident review: the written analysis of an incident's causes and the actions that follow.
 _Avoid_: Post-mortem, RCA document

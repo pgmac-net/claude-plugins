@@ -91,6 +91,15 @@ class ChatAdapter(Protocol):
         """Post text. It is escaped so it cannot mention, link or format; raw is for text the gateway composed
         itself, with every part that came from elsewhere passed through escape() first."""
 
+    async def update(self, posted: Posted, text: str) -> None:
+        """Replace a posted message's text, escaped as post() escapes it."""
+
+    async def delete(self, posted: Posted) -> None:
+        """Remove a message the gateway posted."""
+
+    async def set_typing(self, place: Place, on: bool) -> None:
+        """Show or clear the platform's own 'is writing…' status, where it has one; otherwise do nothing."""
+
     def escape(self, text: str) -> str: ...
 
     async def permalink(self, posted: Posted) -> str | None: ...

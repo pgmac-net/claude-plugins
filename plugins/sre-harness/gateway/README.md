@@ -17,6 +17,10 @@ Design: [ADR 0008](../docs/adr/0008-chat-ops-with-identity-bound-approvals.md) a
 1. **Start.** A responder runs `/incident <what is broken>` (or `/incident drill <text>`), or mentions the bot in the hub channel. The gateway posts a line in the hub and starts an agent session in that message's thread.
 2. **Open.** The agent opens the tracking issue (`incident.py open`). The gateway confirms the result against the harness's local state, creates a private channel `inc-<number>-<slug>` (`drill-…` for drills) and invites the responders. It continues there and announces the incident in the hub.
 3. **Converse.** Each message from a responder is copied to the tracking issue as a comment, then sent to the agent. Anyone else's messages are ignored. Each agent turn finishes before the next message is sent; messages that arrive meanwhile are queued. `status` is answered by the gateway itself and never reaches the agent.
+
+   **While the agent works**, two indicators show it is busy (best-effort; a chat error never holds up the agent):
+   - The **working indicator**: one line, kept as the last message, such as `sre-harness is working: running kube_read.py… (1m 20s)`. It names what the agent is doing from the tool's name, never the tool's input. It shows `waiting for approval` while a request is open, updates every 30 seconds, and is deleted when the turn ends.
+   - The **typing indicator**: Slack's own `sre-harness is writing…` under the message box. Slack shows it only in a thread, so you see it in the hub thread before the incident channel exists, not in the channel itself. It clears just before each post and while an approval request is open. If Slack refuses it, the gateway logs that once and leaves it off until restart. It needs no extra scope or app feature.
 4. **Approve.** A tool call outside the allow-list stops at a permission prompt. The gateway posts an approval request in the channel. The request shows:
    - the tool and its redacted input
    - a link to the agent's statement of the command and its blast radius

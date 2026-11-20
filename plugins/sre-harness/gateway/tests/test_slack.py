@@ -5,9 +5,10 @@ from __future__ import annotations
 import time
 
 import pytest
+from slack_sdk.errors import SlackApiError
 
 from sre_gateway import slack
-from sre_gateway.chat import ApprovalView, Place
+from sre_gateway.chat import ApprovalView, Place, Posted
 
 
 class RecordingClient:
@@ -18,11 +19,53 @@ class RecordingClient:
         self.calls.append(kwargs)
         return {"channel": kwargs["channel"], "ts": "1.0"}
 
+    async def chat_update(self, **kwargs):
+        self.calls.append(("update", kwargs))
+
+    async def chat_delete(self, **kwargs):
+        self.calls.append(("delete", kwargs))
+
+    async def assistant_threads_setStatus(self, **kwargs):  # noqa: N802  pylint: disable=invalid-name
+        self.calls.append(("status", kwargs))
+        if self.refuse:
+            raise SlackApiError("refused", {"ok": False, "error": "team_not_on_paid_plan"})
+
+    refuse = False
+
 
 def adapter():
     instance = slack.SlackAdapter.__new__(slack.SlackAdapter)
     instance._client = RecordingClient()  # pylint: disable=protected-access
+    instance._typing_refused = False  # pylint: disable=protected-access
     return instance
+
+
+async def test_indicator_edits_are_escaped_and_deletes_name_the_message():
+    chat = adapter()
+    await chat.update(Posted("C1", "5.0"), "working <!channel>")
+    await chat.delete(Posted("C1", "5.0"))
+    calls = chat._client.calls  # pylint: disable=protected-access
+    assert calls[0] == ("update", {"channel": "C1", "ts": "5.0", "text": "working &lt;!channel&gt;"})
+    assert calls[1] == ("delete", {"channel": "C1", "ts": "5.0"})
+
+
+async def test_typing_is_set_only_in_a_thread_and_cleared_with_an_empty_status():
+    chat = adapter()
+    await chat.set_typing(Place("C1"), True)
+    assert chat._client.calls == []  # pylint: disable=protected-access
+    await chat.set_typing(Place("C1", "1.0"), True)
+    await chat.set_typing(Place("C1", "1.0"), False)
+    on, off = (kwargs for _kind, kwargs in chat._client.calls)  # pylint: disable=protected-access
+    assert on == {"channel_id": "C1", "thread_ts": "1.0", "status": "is writing…", "loading_messages": ["is writing…"]}
+    assert off == {"channel_id": "C1", "thread_ts": "1.0", "status": "", "loading_messages": None}
+
+
+async def test_a_refused_typing_status_stays_off_until_restart():
+    chat = adapter()
+    chat._client.refuse = True  # pylint: disable=protected-access
+    await chat.set_typing(Place("C1", "1.0"), True)
+    await chat.set_typing(Place("C1", "1.0"), True)
+    assert len(chat._client.calls) == 1  # pylint: disable=protected-access
 
 
 async def test_agent_text_is_escaped_so_it_cannot_mention_or_link():

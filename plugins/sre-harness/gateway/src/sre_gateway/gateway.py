@@ -32,6 +32,7 @@ from sre_gateway.agent import (
 )
 from sre_gateway.approvals import ApprovalBroker, Decision, Recorder
 from sre_gateway.chat import ChatAdapter, Click, Command, Incoming, NameTaken, Place, Posted
+from sre_gateway.indicator import THINKING, IndicatedChat, Indicator, activity_for
 from sre_gateway.runner import Alert, Runner
 from sre_gateway.store import Conversation, Store
 from sre_gateway.tracker import Tracker
@@ -83,6 +84,8 @@ class Session:
     release_after_turn: bool = False
     # Messages kept while the agent could not start; they go to it ahead of the next one.
     held: list[str] = field(default_factory=list)
+    # The working and typing indicators, from the agent's start to the end of its turn.
+    indicator: Indicator | None = None
 
     @property
     def place(self) -> Place:
@@ -127,7 +130,8 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         record_policy: PolicyRecorder | None = None,
     ):
         self.settings = settings
-        self.chat = chat
+        # Every post goes through the indicators, so the working line stays last and typing clears first.
+        self.chat = IndicatedChat(chat)
         self.tracker = tracker
         self.runner = runner
         self._driver_factory = driver_factory
@@ -137,7 +141,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         self._poller: asyncio.Task | None = None
         self._source_failing = False
         self.broker = ApprovalBroker(
-            chat, approvers=settings.approvers, ttl_seconds=settings.approval_ttl, record=record, scrub=scrub
+            self.chat, approvers=settings.approvers, ttl_seconds=settings.approval_ttl, record=record, scrub=scrub
         )
         self.store = Store(settings.state_dir / "conversations.json")
         self.sessions: dict[str, Session] = {}
@@ -415,14 +419,20 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             if message is None:
                 await self._park(session)
                 return
-            if not await self._start_with_retries(session):
-                # Kept, not dropped: an alert's first message is the only time the agent hears of it.
-                session.held.append(message)
-                continue
-            if session.held:
-                message = "\n\n".join([*session.held, message])
-                session.held.clear()
-            await self._turn(session, message)
+            session.indicator = await self.chat.open(lambda: session.place)
+            try:
+                if not await self._start_with_retries(session):
+                    # Kept, not dropped: an alert's first message is the only time the agent hears of it.
+                    session.held.append(message)
+                    continue
+                if session.held:
+                    message = "\n\n".join([*session.held, message])
+                    session.held.clear()
+                session.indicator.set_activity(THINKING)
+                await self._turn(session, message)
+            finally:
+                indicator, session.indicator = session.indicator, None
+                await self.chat.close(indicator)
             if session.release_after_turn:
                 session.release_after_turn = False
                 await self._park(session)
@@ -497,7 +507,11 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             if len(session.calls) >= MAX_TRACKED_CALLS:
                 session.calls.pop(next(iter(session.calls)))
             session.calls[event.tool_use_id] = event
+            if session.indicator is not None:
+                session.indicator.set_activity(activity_for(event.name, event.input))
         elif isinstance(event, ToolOutput):
+            if session.indicator is not None:
+                session.indicator.set_activity(THINKING)
             await self._on_tool_output(session, event)
         elif isinstance(event, TurnEnd):
             session.conv.session_id = event.session_id or session.conv.session_id
@@ -541,14 +555,21 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         if session.last_text is not None:
             with contextlib.suppress(Exception):
                 link = await self.chat.permalink(session.last_text)
-        return await self.broker.ask(
-            incident=session.conv.incident,
-            place=session.place,
-            tool=tool,
-            tool_input=tool_input,
-            tool_use_id=tool_use_id,
-            statement_link=link,
-        )
+        indicator = session.indicator
+        if indicator is not None:
+            await indicator.waiting()
+        try:
+            return await self.broker.ask(
+                incident=session.conv.incident,
+                place=session.place,
+                tool=tool,
+                tool_input=tool_input,
+                tool_use_id=tool_use_id,
+                statement_link=link,
+            )
+        finally:
+            if indicator is not None:
+                await indicator.resumed()
 
     def _refuse_in_triage(
         self, session: Session, tool: str, tool_input: dict[str, Any], tool_use_id: str
