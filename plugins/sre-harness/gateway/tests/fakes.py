@@ -11,10 +11,13 @@ from typing import Any
 
 from sre_gateway.agent import AskPermission, Event, PermissionAnswer, TurnEnd
 from sre_gateway.chat import ApprovalView, NameTaken, Place, Posted
+from sre_gateway.indicator import NAME
+
+INDICATOR_PREFIX = f"{NAME} is "
 
 
 @dataclass
-class FakeChat:
+class FakeChat:  # pylint: disable=too-many-instance-attributes
     posts: list[tuple[Place, str]] = field(default_factory=list)
     approvals: list[tuple[Place, ApprovalView, Posted]] = field(default_factory=list)
     closed: dict[str, str] = field(default_factory=dict)
@@ -39,11 +42,48 @@ class FakeChat:
 
     raw_posts: list[str] = field(default_factory=list)
 
+    # The working indicator's lines, kept apart from posts so tests of what the gateway says are unchanged.
+    lines: list[tuple[Place, str, str]] = field(default_factory=list)  # (place, ts, text) as posted
+    edits: list[tuple[str, str]] = field(default_factory=list)  # (ts, text)
+    deleted: list[str] = field(default_factory=list)
+    typing: list[tuple[Place, bool]] = field(default_factory=list)
+    # Everything posted, indicator lines and typing included, in order: (kind, text, place).
+    timeline: list[tuple[str, str, Place]] = field(default_factory=list)
+    fail_indicator: bool = False
+
     async def post(self, place: Place, text: str, raw: bool = False) -> Posted:
+        posted = Posted(place.channel, self._next())
+        if text.startswith(INDICATOR_PREFIX):
+            if self.fail_indicator:
+                raise RuntimeError("platform error")
+            self.lines.append((place, posted.ts, text))
+            self.timeline.append(("line", text, place))
+            return posted
         self.posts.append((place, text))
+        self.timeline.append(("post", text, place))
         if raw:
             self.raw_posts.append(text)
-        return Posted(place.channel, self._next())
+        return posted
+
+    async def update(self, posted: Posted, text: str) -> None:
+        if self.fail_indicator:
+            raise RuntimeError("platform error")
+        self.edits.append((posted.ts, text))
+
+    async def delete(self, posted: Posted) -> None:
+        if self.fail_indicator:
+            raise RuntimeError("platform error")
+        self.deleted.append(posted.ts)
+
+    async def set_typing(self, place: Place, on: bool) -> None:
+        if self.fail_indicator:
+            raise RuntimeError("platform error")
+        self.typing.append((place, on))
+        self.timeline.append(("typing", "on" if on else "off", place))
+
+    def live_lines(self) -> list[str]:
+        """Indicator lines posted and not deleted."""
+        return [ts for _place, ts, _text in self.lines if ts not in self.deleted]
 
     def escape(self, text: str) -> str:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -54,6 +94,7 @@ class FakeChat:
     async def post_approval(self, place: Place, view: ApprovalView) -> Posted:
         posted = Posted(place.channel, self._next())
         self.approvals.append((place, view, posted))
+        self.timeline.append(("approval", view.tool, place))
         return posted
 
     async def close_approval(self, posted: Posted, view: ApprovalView, outcome: str) -> None:

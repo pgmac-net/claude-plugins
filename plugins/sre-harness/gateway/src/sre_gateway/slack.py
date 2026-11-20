@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 APPROVE, DENY, DENY_REASON, REASON_VIEW = "sre_approve", "sre_deny", "sre_deny_reason", "sre_deny_reason_view"
 IGNORED_INVITE_ERRORS = {"already_in_channel", "cant_invite_self"}
+TYPING = "is writing…"  # Slack puts the app's name in front.
 
 
 def escape(text: str) -> str:
@@ -174,6 +175,7 @@ class SlackAdapter:
         self._stopped = asyncio.Event()
         self._bot_user: str | None = None
         self._names: dict[str, str] = {}
+        self._typing_refused = False
 
     async def start(self, handler: Handler) -> None:
         auth = await self._client.auth_test()
@@ -250,6 +252,33 @@ class SlackAdapter:
             unfurl_media=False,
         )
         return Posted(reply["channel"], reply["ts"])
+
+    async def update(self, posted: Posted, text: str) -> None:
+        await self._client.chat_update(channel=posted.channel, ts=posted.ts, text=escape(to_mrkdwn(text)))
+
+    async def delete(self, posted: Posted) -> None:
+        await self._client.chat_delete(channel=posted.channel, ts=posted.ts)
+
+    async def set_typing(self, place: Place, on: bool) -> None:
+        """Slack's AI-app status ('sre-harness is writing…'). It exists only in a thread.
+
+        If Slack refuses it (the plan, the app's features or the channel type), it stays off until
+        the gateway restarts, and the refusal is logged once.
+        """
+        if self._typing_refused or not place.thread:
+            return
+        try:
+            await self._client.assistant_threads_setStatus(
+                channel_id=place.channel,
+                thread_ts=place.thread,
+                status=TYPING if on else "",
+                loading_messages=[TYPING] if on else None,
+            )
+        except SlackApiError as exc:
+            self._typing_refused = True
+            log.warning(
+                "Slack refused the typing indicator (%s); it stays off until restart", exc.response.get("error")
+            )
 
     async def permalink(self, posted: Posted) -> str | None:
         reply = await self._client.chat_getPermalink(channel=posted.channel, message_ts=posted.ts)
