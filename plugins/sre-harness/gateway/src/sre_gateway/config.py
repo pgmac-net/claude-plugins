@@ -86,6 +86,11 @@ class Config:
         return int(self.chat.get("max_sessions", 2))
 
     @property
+    def link_hosts(self) -> frozenset[str]:
+        """Hosts whose links stay clickable in chat (chat.link_hosts). Empty: no link is clickable."""
+        return frozenset(str(host).lower() for host in self.chat.get("link_hosts") or [])
+
+    @property
     def attachments(self) -> Limits:
         """How much of a message's text attachments is read (chat.attachments, with defaults)."""
         return Limits.from_site(self.chat.get("attachments"))

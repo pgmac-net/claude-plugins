@@ -40,6 +40,14 @@ Design: [ADR 0008](../docs/adr/0008-chat-ops-with-identity-bound-approvals.md) a
 - **Limits.** A question starts only if it leaves at least one agent session free for incident work. A closed or dismissed incident's idle agent doesn't count: the question reclaims it. A question never reclaims another question. Otherwise it is refused at once, so with `max_sessions: 1` there are no questions. A question ends after `question_idle_minutes` (default 5) with no message, or after 10 turns. It also ends when incident work needs its session while it is idle. A busy question finishes its turn first. Questions are not kept across a restart and never resume. A reply in an ended question's thread gets a pointer to `/sre`.
 - **The question log.** The gateway writes its own record of each question, because the audit hook records only inside an incident: `~/.local/state/sre-harness/gateway/questions/q-<time>-<id>.jsonl`, mode 0600. It holds who asked, the question, each tool call (input redacted, output as size and SHA-256 only) and each refusal. Each line carries the hash of the one before it. Logs are deleted after 30 days and never committed. If the first record cannot be written, the question is not asked.
 
+## Message formatting
+
+The agent writes Markdown and the gateway sends it as a Slack `markdown` block, so headings, bold, italic, strikethrough, lists, quotes, code and tables render. Design: [ADR 0024](../docs/adr/0024-agent-replies-are-slack-markdown-blocks-with-an-allowlist-for-links.md).
+
+- **Mentions.** The agent cannot mention a person, a channel or `@here`: `<@`, `<!`, `<#` and `<url|text>` are neutralised, in code as well as prose (an invisible character is added; ordinary code is untouched).
+- **Links.** A link is clickable only if it is `https` and its host is listed under `chat.link_hosts` in `site.yaml`: `github.com` for that host, `*.grafana.net` for any subdomain of `grafana.net`. Any other link shows as `label (`url`)` in code, so the address is visible but nothing is clickable; a bare `https://` or `www.` address off the list is put in code the same way. With no `link_hosts` nothing is clickable. `validate_site.py` checks the list.
+- **Long replies.** Slack allows 12,000 characters in markdown blocks per message. A longer reply, or one Slack refuses, is sent as plain text with the older formatting (bold, headings and a fixed-width table); the first refusal of each kind is logged.
+
 ## Attachments
 
 A responder can attach a snippet or text file (a log excerpt, a config) to a message, and the agent reads it. Slack also turns a very long paste into a snippet, so this is how long output reaches the agent. Design: [ADR 0023](../docs/adr/0023-attachments-reach-the-agent-as-redacted-truncated-untrusted-text.md).

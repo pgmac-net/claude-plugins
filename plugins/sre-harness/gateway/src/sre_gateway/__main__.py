@@ -163,7 +163,7 @@ def build(config: Config) -> Gateway:
     )
     return Gateway(
         settings,
-        chat=SlackAdapter(config.tokens["bot_token"], config.tokens["app_token"]),
+        chat=SlackAdapter(config.tokens["bot_token"], config.tokens["app_token"], config.link_hosts),
         tracker=GhTracker(config.doc),
         driver_factory=driver_factory,
         record=record,

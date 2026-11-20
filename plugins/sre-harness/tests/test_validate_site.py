@@ -235,3 +235,20 @@ class TestChatAttachments:
     def test_the_message_cap_cannot_be_below_the_file_cap(self, edit_site):
         errors = self.errors(edit_site, {"max_file_kb": 100, "max_message_kb": 50})
         assert errors == ["site.yaml: chat/attachments/max_message_kb: smaller than max_file_kb"]
+
+
+class TestChatLinkHosts:
+    def errors(self, edit_site, hosts):
+        chat = {**CHAT, "link_hosts": hosts}
+        return [err for err in errors_for(edit_site(lambda doc: doc.update({"chat": chat}))) if "link_hosts" in err]
+
+    def test_hosts_and_wildcard_hosts_are_valid(self, edit_site):
+        assert self.errors(edit_site, []) == []
+        assert self.errors(edit_site, ["github.com", "*.grafana.net", "nagios.pgmac.net"]) == []
+
+    @pytest.mark.parametrize("bad", ["https://github.com", "github.com/x", "localhost", "*github.com", "a b.com", "*"])
+    def test_anything_but_a_host_name_is_rejected(self, edit_site, bad):
+        assert self.errors(edit_site, [bad])
+
+    def test_duplicates_are_rejected(self, edit_site):
+        assert self.errors(edit_site, ["github.com", "github.com"])
