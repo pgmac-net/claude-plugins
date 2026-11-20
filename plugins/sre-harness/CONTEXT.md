@@ -238,6 +238,18 @@ _Avoid_: Admin, owner
 A single-use, expiring chat message asking an approver to allow one tool call, stating the call and its blast radius.
 _Avoid_: Approval card, confirmation prompt
 
+**Question**:
+A read-only conversation a responder starts with `/sre <question>`, answered in a hub thread by a short-lived agent session that opens no incident and can change nothing.
+_Avoid_: Query, ask, chat session
+
+**Question policy**:
+The tool policy of a question: the chat allow-list without the calls that write a record or change a system, with every other call refused without asking anyone.
+_Avoid_: Read-only mode (that is the triage-only policy's avoided name too), Q&A mode
+
+**Question log**:
+The gateway's own record of one question: who asked, what, and every tool call and refusal, kept on the gateway host for 30 days and never committed.
+_Avoid_: Audit log (that belongs to an incident), transcript
+
 **Working indicator**:
 The one line the chat gateway keeps as the last message of a conversation while its agent starts and works a turn, naming the activity from the tool's name (never its input) and the time taken; deleted when the turn ends.
 _Avoid_: Status message (the `status` command is something else), progress bar

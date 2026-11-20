@@ -17,9 +17,9 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from sre_gateway import harness, prompts
+from sre_gateway import harness, prompts, questions
 from sre_gateway.agent import (
     AgentDriver,
     AskPermission,
@@ -49,6 +49,16 @@ STATUS_WORDS = frozenset({"status", "!status"})
 TRIAGE, CHAT = "triage-only", "chat"
 RUNNER_NAME = "the alert source"
 DRILL_ALERT = re.compile(r"^alert\s+(\S+)\s*(.*)$", re.IGNORECASE | re.DOTALL)
+QUESTION = "question"
+QUESTION_TURNS = 10
+ENDED_QUESTIONS_KEPT = 200
+QUESTION_REFUSAL = (
+    "Refused without asking: this is a read-only question, which may only read. "
+    "Do not retry; say in your answer what this would have checked or changed."
+)
+QUESTION_BUSY = "The agent sessions are busy with incident work; ask again later."
+QUESTION_PREEMPTED = "This question ended to free the agent for incident work. Ask again with `/sre`."
+QUESTION_ENDED = "This question has ended; ask again with `/sre`."
 TRIAGE_REFUSAL = (
     "Refused without asking: this is an unattended triage, which may only read, keep its record and propose a fix. "
     "Do not retry; say in the summary what this would have checked or changed."
@@ -56,8 +66,12 @@ TRIAGE_REFUSAL = (
 
 PolicyChange = harness.audit.PolicyChange
 PolicyRecorder = Callable[[PolicyChange], None]
-# (permission callback, triage token or None for the chat policy) -> a driver
-DriverFactory = Callable[[AskPermission, str | None], AgentDriver]
+
+
+class DriverFactory(Protocol):  # pylint: disable=too-few-public-methods
+    """(permission callback, triage token or None, whether it is a question) -> a driver under that policy."""
+
+    def __call__(self, ask: AskPermission, triage: str | None, question: bool = False) -> AgentDriver: ...
 
 
 @dataclass(frozen=True)
@@ -69,10 +83,11 @@ class Settings:
     idle_seconds: int
     max_sessions: int
     state_dir: Path
+    question_idle_seconds: int = 300
 
 
 @dataclass
-class Session:
+class Session:  # pylint: disable=too-many-instance-attributes
     conv: Conversation
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     driver: AgentDriver | None = None
@@ -86,6 +101,13 @@ class Session:
     held: list[str] = field(default_factory=list)
     # The working and typing indicators, from the agent's start to the end of its turn.
     indicator: Indicator | None = None
+    # A question's turns so far, and its log; an incident has neither.
+    turns: int = 0
+    qlog: questions.QuestionLog | None = None
+
+    @property
+    def question(self) -> bool:
+        return self.conv.policy == QUESTION
 
     @property
     def place(self) -> Place:
@@ -128,6 +150,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         scrub: Callable[[str], str],
         runner: Runner | None = None,
         record_policy: PolicyRecorder | None = None,
+        env_values: dict[str, str] | None = None,
     ):
         self.settings = settings
         # Every post goes through the indicators, so the working line stays last and typing clears first.
@@ -148,6 +171,10 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         self._slots = asyncio.Semaphore(settings.max_sessions)
         self._live = 0
         self._archiver: asyncio.Task | None = None
+        # Sessions waiting for a free agent slot, and the threads of questions that have ended.
+        self._waiting = 0
+        self._ended_questions: dict[str, None] = {}
+        self._env_values = env_values or {}
 
     # --- lifecycle -------------------------------------------------------------
 
@@ -174,6 +201,8 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             if session.worker:
                 session.worker.cancel()
             await self._park(session)
+            if session.question:
+                self._log_question(session, "ended", "the gateway stopped")
         self._save()
 
     def _add(self, conv: Conversation) -> Session:
@@ -183,11 +212,15 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         return session
 
     def _save(self) -> None:
-        self.store.save([s.conv for s in self.sessions.values()])
+        # A question is never kept: it does not survive a restart, so it never resumes.
+        self.store.save([s.conv for s in self.sessions.values() if not s.question])
 
     # --- chat events -------------------------------------------------------------
 
     async def on_command(self, command: Command) -> None:
+        if command.name == "sre":
+            await self._start_question(command)
+            return
         if command.name != "incident":
             return
         if command.user not in self.settings.responders:
@@ -217,6 +250,8 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         session = self._find(message)
         if session is not None:
             await self._converse(session, message)
+        elif message.thread is not None and f"{message.channel}:{message.thread}" in self._ended_questions:
+            await self.chat.tell(Place(message.channel, message.thread), message.user, QUESTION_ENDED)
         elif message.channel == self.settings.hub and message.thread is None and message.mentions_bot:
             text, drill = self._drill(message.text)
             if text:
@@ -270,9 +305,98 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             await self._end_triage(session, message, name)
             await session.queue.put(prompts.joined_message(name, text))
             return
+        if session.question:
+            self._log_question(session, "message", message.user, text)
         if session.busy:
             await self.chat.tell(session.place, message.user, "Queued: the agent is still on the previous message.")
         await session.queue.put(f"[chat] {name}: {text}")
+
+    # --- questions -----------------------------------------------------------------
+
+    async def _start_question(self, command: Command) -> None:
+        """'/sre <question>': a read-only session in a hub thread that opens no incident (ADR 0022)."""
+        where = Place(command.channel)
+        if command.user not in self.settings.responders:
+            await self.chat.tell(where, command.user, "Only listed responders can ask the agent.")
+            return
+        text = command.text.strip()
+        if not text:
+            await self.chat.tell(where, command.user, "Usage: /sre <question>")
+            return
+        if not self._question_room():
+            await self.chat.tell(where, command.user, QUESTION_BUSY)
+            return
+        qlog = questions.QuestionLog(self.settings.state_dir / "questions", questions.new_id(), self._env_values)
+        try:
+            qlog.asked(command.user, text)
+        except Exception:  # noqa: BLE001  pylint: disable=broad-exception-caught
+            # A question that left no record is not asked.
+            log.exception("could not write the question log")
+            await self.chat.tell(where, command.user, "The question could not be recorded, so it was not asked.")
+            return
+        name = await self._name(command.user)
+        posted = await self.chat.post(Place(self.settings.hub), self._scrub(f"{name} asked: {text}"))
+        place = Place(self.settings.hub, posted.ts)
+        conv = Conversation(
+            key=f"{place.channel}:{place.thread}",
+            channel=place.channel,
+            thread=place.thread,
+            started_by=command.user,
+            policy=QUESTION,
+        )
+        session = self._add(conv)
+        session.qlog = qlog
+        await session.queue.put(prompts.question_message(name, text))
+
+    def _question_room(self) -> bool:
+        """Whether a question may take an agent session: only if one is still left for incident work."""
+        return self._live + self._waiting + 1 < self.settings.max_sessions
+
+    async def _preempt_question(self) -> None:
+        """End one idle question, so incident work that needs its session gets it now."""
+        for session in list(self.sessions.values()):
+            if session.question and session.driver is not None and not session.busy:
+                await self._end_question(session, QUESTION_PREEMPTED, "preempted")
+                return
+
+    async def _after_question_turn(self, session: Session) -> None:
+        if session.conv.ended:
+            return
+        session.turns += 1
+        if session.turns >= QUESTION_TURNS:
+            await self._end_question(
+                session, f"This question reached its limit of {QUESTION_TURNS} turns. Ask again with `/sre`.", "turns"
+            )
+        elif self._waiting:
+            # Incident work is waiting for this session's slot.
+            await self._end_question(session, QUESTION_PREEMPTED, "preempted")
+
+    async def _end_question(self, session: Session, notice: str | None, reason: str) -> None:
+        """Stop a question for good: its slot is freed, its thread answers only with a pointer to /sre."""
+        conv = session.conv
+        if conv.ended:
+            return
+        conv.ended = conv.archived = True
+        await self._park(session)
+        self.sessions.pop(conv.key, None)
+        self._ended_questions[conv.key] = None
+        while len(self._ended_questions) > ENDED_QUESTIONS_KEPT:
+            self._ended_questions.pop(next(iter(self._ended_questions)))
+        self._log_question(session, "ended", reason)
+        if notice:
+            await self._say(session.place, notice)
+        # The worker takes this as its signal to stop.
+        await session.queue.put(None)
+
+    def _log_question(self, session: Session, event: str, *args: Any) -> None:
+        """Write one record to a question's log. A failure is reported in status, never raised."""
+        if session.qlog is None:
+            return
+        try:
+            getattr(session.qlog, event)(*args)
+        except Exception as exc:  # noqa: BLE001  pylint: disable=broad-exception-caught
+            log.exception("could not write the question log")
+            session.last_problem = f"writing the question log failed: {type(exc).__name__}"
 
     # --- unattended triage ---------------------------------------------------------
 
@@ -281,7 +405,11 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
 
         One the agent has closed or dismissed is not, even while its channel waits for the archive sweep.
         """
-        return [s for s in self.sessions.values() if not s.conv.archived and not s.conv.ended and s.conv.drill == drill]
+        return [
+            s
+            for s in self.sessions.values()
+            if not s.question and not s.conv.archived and not s.conv.ended and s.conv.drill == drill
+        ]
 
     async def on_alerts(self, alerts: list[Alert]) -> None:
         """New qualifying problems from one poll: into an open incident, else one new triage, else a notice."""
@@ -392,8 +520,13 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             agent = "idle"
         else:
             agent = "stopped (the next message resumes it)" if conv.session_id else "not started"
+        first = (
+            f"Question: read-only, no incident; turns used {session.turns} of {QUESTION_TURNS}"
+            if session.question
+            else f"Incident: {conv.incident or 'not opened yet'}{' (drill)' if conv.drill else ''}"
+        )
         lines = [
-            f"Incident: {conv.incident or 'not opened yet'}{' (drill)' if conv.drill else ''}",
+            first,
             f"Started by: {'the alert source' if conv.auto else 'a responder'}; policy: {conv.policy}",
             f"Agent: {agent}; messages queued: {session.queue.qsize()}",
             f"Approval requests open: {self.broker.open_requests}",
@@ -407,13 +540,22 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
 
     async def _work(self, session: Session) -> None:
         """Feed one session its messages, one turn at a time; stop the agent when idle."""
+        idle = self.settings.question_idle_seconds if session.question else self.settings.idle_seconds
         while True:
             try:
                 if session.driver is not None:
-                    message = await asyncio.wait_for(session.queue.get(), self.settings.idle_seconds)
+                    message = await asyncio.wait_for(session.queue.get(), idle)
                 else:
                     message = await session.queue.get()
             except TimeoutError:
+                if session.question:
+                    minutes = max(1, idle // 60)
+                    await self._end_question(
+                        session,
+                        f"This question ended after {minutes} minute(s) with no message. Ask again with `/sre`.",
+                        "idle",
+                    )
+                    continue
                 await self._park(session)
                 continue
             if message is None:
@@ -421,9 +563,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
                 return
             session.indicator = await self.chat.open(lambda: session.place)
             try:
-                if not await self._start_with_retries(session):
-                    # Kept, not dropped: an alert's first message is the only time the agent hears of it.
-                    session.held.append(message)
+                if not await self._begin(session, message):
                     continue
                 if session.held:
                     message = "\n\n".join([*session.held, message])
@@ -433,9 +573,25 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             finally:
                 indicator, session.indicator = session.indicator, None
                 await self.chat.close(indicator)
+            if session.question:
+                await self._after_question_turn(session)
             if session.release_after_turn:
                 session.release_after_turn = False
                 await self._park(session)
+
+    async def _begin(self, session: Session, message: str) -> bool:
+        """Have an agent ready for this message; False if there is none, after dealing with the message."""
+        if session.question:
+            if await self._ensure_driver(session):
+                return True
+            # One try, no waiting: a question that cannot start now is simply asked again later.
+            await self._end_question(session, None, "did not start")
+            return False
+        if await self._start_with_retries(session):
+            return True
+        # Kept, not dropped: an alert's first message is the only time the agent hears of it.
+        session.held.append(message)
+        return False
 
     async def _start_with_retries(self, session: Session) -> bool:
         """Start the agent, trying again after a pause: a start can fail on a passing network or DNS fault."""
@@ -456,14 +612,29 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
     async def _ensure_driver(self, session: Session) -> bool:
         if session.driver is not None:
             return True
-        if self._slots.locked():
-            await self.chat.post(
-                session.place, "All agent sessions are in use; this one starts as soon as one is free."
-            )
-        await self._slots.acquire()
+        if session.conv.ended and session.question:
+            return False
+        if session.question:
+            # Checked with no await before the slot is taken, so two questions cannot both pass.
+            if not self._question_room():
+                await self.chat.post(session.place, QUESTION_BUSY)
+                return False
+        elif self._slots.locked():
+            # Incident work never waits behind a question that is only sitting idle.
+            await self._preempt_question()
+            if self._slots.locked():
+                await self.chat.post(
+                    session.place, "All agent sessions are in use; this one starts as soon as one is free."
+                )
+        self._waiting += 1
+        try:
+            await self._slots.acquire()
+        finally:
+            self._waiting -= 1
         driver = self._driver_factory(
             lambda tool, data, call_id: self._ask(session, tool, data, call_id),
             session.conv.triage_token if session.conv.policy == TRIAGE else None,
+            question=session.question,
         )
         try:
             await driver.start(session.conv.session_id)
@@ -507,18 +678,25 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             if len(session.calls) >= MAX_TRACKED_CALLS:
                 session.calls.pop(next(iter(session.calls)))
             session.calls[event.tool_use_id] = event
+            if session.question:
+                self._log_question(session, "attempt", event.name, event.input, event.tool_use_id)
             if session.indicator is not None:
                 session.indicator.set_activity(activity_for(event.name, event.input))
         elif isinstance(event, ToolOutput):
             if session.indicator is not None:
                 session.indicator.set_activity(THINKING)
+            if session.question:
+                # A question has no record to follow: its output is only logged, never read for incident calls.
+                session.calls.pop(event.tool_use_id, None)
+                self._log_question(session, "complete", event.tool_use_id, event.text, event.is_error)
+                return
             await self._on_tool_output(session, event)
         elif isinstance(event, TurnEnd):
             session.conv.session_id = event.session_id or session.conv.session_id
             if event.error:
                 session.last_problem = event.error
                 await self._say(session.place, f"The agent stopped: {event.error}")
-                if not session.conv.incident:
+                if not session.conv.incident and not session.question:
                     # Nothing to keep warm: free the slot for others; the next message resumes the session.
                     session.release_after_turn = True
 
@@ -551,6 +729,10 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
     async def _ask(self, session: Session, tool: str, tool_input: dict[str, Any], tool_use_id: str) -> PermissionAnswer:
         if session.conv.policy == TRIAGE:
             return self._refuse_in_triage(session, tool, tool_input, tool_use_id)
+        if session.question:
+            # No approval request for a question: it is read-only for life (ADR 0022).
+            self._log_question(session, "refused", tool, tool_input, tool_use_id)
+            return PermissionAnswer(False, QUESTION_REFUSAL)
         link = None
         if session.last_text is not None:
             with contextlib.suppress(Exception):
@@ -665,7 +847,15 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         await asyncio.sleep(ARCHIVE_FIRST_SECONDS)
         while True:
             await self.archive_closed()
+            self.prune_questions()
             await asyncio.sleep(ARCHIVE_CHECK_SECONDS)
+
+    def prune_questions(self) -> None:
+        """Remove question logs past their retention."""
+        try:
+            questions.prune(self.settings.state_dir / "questions")
+        except Exception:  # noqa: BLE001  pylint: disable=broad-exception-caught
+            log.exception("could not prune the question logs")
 
     async def archive_closed(self) -> None:
         """Archive the channel of each incident whose tracking issue a person has closed."""

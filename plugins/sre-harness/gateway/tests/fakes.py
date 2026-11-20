@@ -177,8 +177,8 @@ class FakeDriver:
 
 
 def driver_factory(script: list[list[Event | tuple]], log: dict[str, Any]):
-    def make(ask: AskPermission, triage: bool = False) -> FakeDriver:
-        log.setdefault("policies", []).append("triage-only" if triage else "chat")
+    def make(ask: AskPermission, triage: bool = False, question: bool = False) -> FakeDriver:
+        log.setdefault("policies", []).append("question" if question else "triage-only" if triage else "chat")
         return FakeDriver(ask, script, log)
 
     return make

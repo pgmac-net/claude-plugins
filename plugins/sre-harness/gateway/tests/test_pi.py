@@ -149,6 +149,22 @@ async def test_triage_carries_its_token_and_refuses_closing(setup):
     assert any(isinstance(e, Text) and e.text.startswith("blocked: denied") for e in events)
 
 
+async def test_a_question_reads_but_cannot_write_its_timeline(setup):
+    ask = Asker(allow=True)
+    rules = harness.tool_policy.Policy.from_rules(harness.chat_policy.question_rules({}))
+    driver = pi.PiDriver(setup, rules, ask, system_append="extra")
+    await driver.start(None)
+    scripts = harness.SCRIPTS
+    try:
+        read = await run(driver, "tool bash " + json.dumps({"command": f"uv run {scripts}/slo.py status"}))
+        write = await run(driver, "tool bash " + json.dumps({"command": f"uv run {scripts}/timeline.py add x"}))
+    finally:
+        await driver.stop()
+    assert Text("ran") in read
+    assert any(isinstance(e, Text) and e.text.startswith("blocked: denied") for e in write)
+    assert ask.asked == []
+
+
 async def test_concurrent_dialogs_are_each_answered(setup):
     driver = await started(setup, Asker(allow=False))
     try:

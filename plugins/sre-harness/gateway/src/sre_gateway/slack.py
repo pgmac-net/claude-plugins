@@ -217,6 +217,12 @@ class SlackAdapter:
             text = command.get("text", "")
             await handler.on_command(Command("incident", command["user_id"], command["channel_id"], text))
 
+        @app.command("/sre")
+        async def _sre(ack: Any, command: dict[str, Any]) -> None:
+            await ack()
+            text = command.get("text", "")
+            await handler.on_command(Command("sre", command["user_id"], command["channel_id"], text))
+
         @app.action(APPROVE)
         async def _approve(ack: Any, body: dict[str, Any]) -> None:
             await ack()

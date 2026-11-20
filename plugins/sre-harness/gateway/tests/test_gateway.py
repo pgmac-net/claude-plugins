@@ -57,6 +57,7 @@ def make(state, script, log, **overrides):
         idle_seconds=overrides.pop("idle", 600),
         max_sessions=overrides.pop("max_sessions", 2),
         state_dir=state / "gateway",
+        question_idle_seconds=overrides.pop("question_idle", 600),
     )
     chat, tracker = overrides.pop("chat", FakeChat()), overrides.pop("tracker", FakeTracker())
     records = []
@@ -69,6 +70,7 @@ def make(state, script, log, **overrides):
         scrub=lambda text: text.replace(TOKEN, "[REDACTED]"),
         runner=overrides.pop("runner", None),
         record_policy=overrides.pop("record_policy", None),
+        env_values=overrides.pop("env_values", None),
     )
     return gateway, chat, tracker, records
 

@@ -77,6 +77,10 @@ class Config:
         return int(self.chat.get("idle_stop_minutes", 30)) * 60
 
     @property
+    def question_idle_seconds(self) -> int:
+        return int(self.chat.get("question_idle_minutes", 5)) * 60
+
+    @property
     def max_sessions(self) -> int:
         return int(self.chat.get("max_sessions", 2))
 

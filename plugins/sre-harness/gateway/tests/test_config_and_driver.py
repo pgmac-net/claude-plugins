@@ -123,6 +123,19 @@ def test_triage_options_narrow_the_rules_and_flag_the_scripts(site):
     assert "UNATTENDED TRIAGE" in options.system_prompt["append"]
 
 
+def test_question_options_use_the_question_rules_and_instructions(site):
+    config = config_module.load(env_for(site), take_tokens=False)
+    options = agent_options(config, None, None, question=True)
+    assert harness.sre_common.TRIAGE_ENV not in options.env
+    permissions = json.loads(options.settings)["permissions"]
+    assert not any("incident.py open" in rule or "timeline.py" in rule for rule in permissions["allow"])
+    assert any(rule.endswith("timeline.py *)") for rule in permissions["deny"])
+    assert any("slo.py status" in rule for rule in permissions["allow"])
+    assert "This is a QUESTION, not an incident" in options.system_prompt["append"]
+    assert "start-incident skill. Open the record" not in options.system_prompt["append"]
+    assert config.question_idle_seconds == 300
+
+
 # --- the harness link -------------------------------------------------------------
 
 

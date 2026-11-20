@@ -31,6 +31,15 @@ Design: [ADR 0008](../docs/adr/0008-chat-ops-with-identity-bound-approvals.md) a
 
 **Sessions.** One resumable session per incident. A session stops after `idle_stop_minutes` and resumes by its ID on the next message. At most `max_sessions` run at once; others wait, and say so. The conversation-to-session mapping survives restarts (`~/.local/state/sre-harness/gateway/conversations.json`, mode 0600). Usage limits, crashes and restarts are posted in the channel. If the agent fails to start, the gateway tries 3 times, 30s then 60s apart. After that, the message is kept and goes to the agent ahead of the next one, so an alert is never lost to a failed start.
 
+## Questions
+
+`/sre <question>` asks the agent a reliability question without opening an incident, for example `/sre where does the ingress SLO stand?`. Design: [ADR 0022](../docs/adr/0022-questions-are-read-only-for-life-and-yield-to-incidents.md).
+
+- **Where.** Run it in any channel. The gateway posts "<name> asked: <question>" in the hub and the agent answers in that post's thread. Only responders can ask. Replies from responders in the thread reach the same session. Nothing is copied to a tracker.
+- **What it may do.** The **question policy** is the chat allow-list without anything that writes a record or a system: `incident.py` open, attach, set, close, promote and dismiss, `timeline.py` and `autonomy.py run` are refused outright. Every other call outside the allow-list is refused at once, with no approval request. If the agent finds something broken now, it gives the evidence and suggests `/incident <summary>`. A question never becomes an incident.
+- **Limits.** A question starts only if it leaves at least one agent session free for incident work. Otherwise it is refused at once, so with `max_sessions: 1` there are no questions. A question ends after `question_idle_minutes` (default 5) with no message, or after 10 turns. It also ends when incident work needs its session while it is idle. A busy question finishes its turn first. Questions are not kept across a restart and never resume. A reply in an ended question's thread gets a pointer to `/sre`.
+- **The question log.** The gateway writes its own record of each question, because the audit hook records only inside an incident: `~/.local/state/sre-harness/gateway/questions/q-<time>-<id>.jsonl`, mode 0600. It holds who asked, the question, each tool call (input redacted, output as size and SHA-256 only) and each refusal. Each line carries the hash of the one before it. Logs are deleted after 30 days and never committed. If the first record cannot be written, the question is not asked.
+
 ## Unattended triage
 
 With a `runner` section in `site.yaml` and `enabled: true`, the gateway also starts incidents itself. Design: [ADR 0018](../docs/adr/0018-unattended-triage-runs-in-the-gateway-triage-only-until-a-responder-speaks.md) and [ADR 0019](../docs/adr/0019-unattended-triage-is-private-until-a-responder-promotes-it.md).
@@ -55,6 +64,8 @@ The agent runs with only the plugin's chat policy (`scripts/chat_policy.py`). Us
 | Without asking | Refused outright | Everything else |
 |---|---|---|
 | Read, Grep, Glob, skills; the harness scripts; `kube_read.py` (read-only kubectl, checked per argument); `gh issue/pr view/list`; `systemctl status`; site additions from `chat.allow` | Credential paths, the gateway's secrets, the harness state directory, `/proc`, `.env` files, `env`/`printenv`, `gh auth`, kubectl secrets/exec/port-forward/connection options, web fetch and search | An approval request |
+
+A question runs under the narrower question policy, and an unattended triage under the triage-only policy. In both, "everything else" is refused instead of asked.
 
 The allow-list is not a sandbox. Claude Code itself lets a fixed set of read-only shell commands run in every mode, and applies path deny rules to them only on a best-effort basis. The approval gate is what stops a change.
 
@@ -94,7 +105,7 @@ Needs `uv`, the `gh` CLI signed in, `kubectl` if the agent should read a cluster
    systemctl --user daemon-reload && systemctl --user enable --now sre-gateway
    ```
 
-Upgrade by moving the plugin checkout to a new tag or commit, running `uv sync --frozen --no-dev`, and restarting the service.
+Upgrade by moving the plugin checkout to a new tag or commit, running `uv sync --frozen --no-dev`, and restarting the service. If the release adds a slash command (0.17.0 adds `/sre`), add it to the Slack app too: Slash Commands > Create New Command, or paste the updated manifest under App Manifest.
 
 ## Running on Pi
 
