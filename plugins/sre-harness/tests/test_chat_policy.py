@@ -51,6 +51,7 @@ def test_close_out_is_allowed_without_the_options_that_weaken_it():
     assert "Bash(uv run /p/audit.py commit *)" in rules["allow"]
     assert "Bash(uv run /p/incident.py gc *)" in rules["allow"]
     assert "Bash(uv run /p/audit.py commit *--of*)" in rules["deny"]
+    assert "Bash(uv run /p/audit.py commit *--unr*)" in rules["deny"]
     assert "Bash(uv run /p/incident.py gc *--ig*)" in rules["deny"]
     for withheld in (chat_policy.triage_rules(chat(), Path("/p")), chat_policy.question_rules(chat(), Path("/p"))):
         assert "Bash(uv run /p/audit.py commit *)" in withheld["deny"]

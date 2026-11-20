@@ -64,13 +64,17 @@ It verifies the chain, compares the log with the hashes pinned in the timeline, 
 
 Running it again is safe. If the same log is already on the default branch it says `preserved`; if it is on the audit branch waiting for its pull request it says `pending`; either way it exits 0 and makes sure capture has stopped. If the log has changed since it was pushed, it refuses rather than overwrite an audit record; `--amend` pushes the new log to the same branch as a new commit, and is for a person to decide.
 
-From the chat gateway, `audit.py commit` and `incident.py gc` run without an approval request, but `commit --offline` and `gc --ignore-issue-state` are refused. Once the log is committed, the gateway refuses any further approval request for that incident at once, because none could be recorded.
+`audit.py commit` refuses an incident that is not resolved, because committing stops capture and the gateway then refuses every approval for that incident. Run `incident.py close --incident <id>` first. `--unresolved` overrides this and is for a person to decide.
+
+From the chat gateway, `audit.py commit` and `incident.py gc` run without an approval request, but `commit --offline`, `commit --unresolved` and `gc --ignore-issue-state` are refused. Once the log is committed, the gateway refuses any further approval request for that incident at once, because none could be recorded. If a decision cannot be written for any other reason, the refusal now says why (`Refused: the approval could not be recorded: <reason>`).
+
+**Which incident the gateway follows.** The gateway records approvals against the incident named by the agent's last `incident.py open`, `attach` or `promote` in that channel. Bind tokens are the audit hook's business only; the gateway never reads them, and attaching again from a terminal does not move or break the channel. To see which incident a channel follows, say `status` in it. To move a channel, have its agent run `incident.py attach <id>`. If every non-pre-approved command is refused, check that incident's audit log is not already committed (`audit.py show --incident <id>`).
 
 ## Naming the incident
 
 Scripts called without `--incident` act on the machine's *current* incident, the one last opened or attached. Under the chat gateway every session shares that pointer, so the gateway sets `SRE_HARNESS_NO_CURRENT=1` and a call without `--incident` is refused. Pass it after the subcommand, e.g. `timeline.py add --incident <id> ...`, so the call still matches the allow-list. Writes print the incident they touched.
 
-`incident.py attach` to an incident that is already known keeps its local state and only refreshes what the issue says. A resolved incident stays resolved; `attach --reopen` reopens it and records that as a timeline decision.
+`incident.py attach` to an incident that is already known keeps its local state and only refreshes what the issue says. A resolved incident stays resolved; `attach --reopen` reopens it and records that as a timeline decision. With no local state (cleared by `gc`, or another machine), an issue body whose Phase is `Resolved` is attached as resolved, with the resolved time taken from the body's `Resolved:` line. If its audit log is already committed, no capture starts: the output has `"bind": null` and no `active` marker is written.
 
 ## Afterwards: local state
 

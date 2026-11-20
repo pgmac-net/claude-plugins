@@ -63,7 +63,7 @@ The agent runs with only the plugin's chat policy (`scripts/chat_policy.py`). Us
 
 | Without asking | Refused outright | Everything else |
 |---|---|---|
-| Read, Grep, Glob, skills; the harness scripts, including close-out (`audit.py commit`, `incident.py gc`); `kube_read.py` (read-only kubectl, checked per argument); `gh issue/pr view/list`; `systemctl status`; site additions from `chat.allow` | Credential paths, the gateway's secrets, the harness state directory, `/proc`, `.env` files, `env`/`printenv`, `gh auth`, kubectl secrets/exec/port-forward/connection options, web fetch and search; `audit.py commit --offline`, `incident.py gc --ignore-issue-state` | An approval request, refused at once (no card) when the incident's audit log is already committed |
+| Read, Grep, Glob, skills; the harness scripts, including close-out (`audit.py commit`, `incident.py gc`); `kube_read.py` (read-only kubectl, checked per argument); `gh issue/pr view/list`; `systemctl status`; site additions from `chat.allow` | Credential paths, the gateway's secrets, the harness state directory, `/proc`, `.env` files, `env`/`printenv`, `gh auth`, kubectl secrets/exec/port-forward/connection options, web fetch and search; `audit.py commit --offline`, `audit.py commit --unresolved`, `incident.py gc --ignore-issue-state` | An approval request, refused at once (no card) when the incident's audit log is already committed |
 
 Every agent gets `SRE_HARNESS_NO_CURRENT=1`: the sessions share one current-incident pointer, so a harness script called without `--incident <id>` is refused instead of acting on whichever incident was opened last.
 

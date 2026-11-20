@@ -121,7 +121,24 @@ async def test_failed_record_refuses_the_call():
     await b.on_click(Click(view.request_id, APPROVER, "approve"))
     answer = await task
     assert not answer.allow
-    assert "could not be recorded" in answer.message
+    assert answer.message == "Refused: the approval could not be recorded: disk full"
+    assert "(disk full)" in chat.closed[view.request_id]
+
+
+async def test_the_refusal_reason_is_scrubbed_and_bounded():
+    chat = FakeChat()
+
+    def record(_decision: Decision) -> None:
+        raise OSError(f"cannot write {TOKEN} " + "x" * 1000)
+
+    b = ApprovalBroker(
+        chat, approvers=frozenset({APPROVER}), ttl_seconds=60, record=record, scrub=lambda t: t.replace(TOKEN, "[R]")
+    )
+    task, view = await pending_request(chat, b)
+    await b.on_click(Click(view.request_id, APPROVER, "approve"))
+    answer = await task
+    assert TOKEN not in answer.message and "[R]" in answer.message
+    assert len(answer.message) < 400
 
 
 async def test_request_text_is_scrubbed():

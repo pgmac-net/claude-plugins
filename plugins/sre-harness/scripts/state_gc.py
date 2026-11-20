@@ -224,14 +224,28 @@ def _remove(path: Path, state: Path) -> bool:
     return True
 
 
-def run(doc: dict[str, Any], site_root: Path, policy: Policy, apply: bool) -> dict[str, Any]:
-    """Assess every local incident and, with apply, clear those that pass."""
+def run(
+    doc: dict[str, Any], site_root: Path, policy: Policy, apply: bool, only: list[str] | None = None
+) -> dict[str, Any]:
+    """Assess local incidents and, with apply, clear those that pass.
+
+    Every local incident is assessed, unless 'only' names some. A named incident
+    with no local state is reported as kept, so a mistyped id is visible. A
+    targeted run leaves every other incident's files, and the unused bind
+    tokens, alone.
+    """
     state = audit_hook.state_dir()
     fetched: set[Path] = set()
-    verdicts = [assess(i, doc, site_root, fetched, policy) for i in sorted(local_incidents(state))]
+    local = local_incidents(state)
+    wanted = local if only is None else local & set(only)
+    verdicts = [assess(i, doc, site_root, fetched, policy) for i in sorted(wanted)]
+    if only is not None:
+        verdicts += [
+            {"id": i, "clear": False, "files": [], "reason": "no local state"} for i in sorted(set(only) - local)
+        ]
     cleared = [v for v in verdicts if v["clear"]]
     listed = {path for v in cleared for path in v["files"]}
-    tokens = stale_tokens(state, listed, policy.token_days)
+    tokens = stale_tokens(state, listed, policy.token_days) if only is None else []
     deleted = 0
     if apply:
         for path in [*(Path(p) for p in sorted(listed)), *tokens]:

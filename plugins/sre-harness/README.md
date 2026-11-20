@@ -87,7 +87,7 @@ uv run scripts/audit.py verify --check-anchors
 uv run scripts/audit.py commit     # to the site's private audit location, on a branch, as a pull request
 ```
 
-`incident.py close` prints the close-out steps still to do. `audit.py commit` is safe to run again: it reports `preserved` or `pending`, and refuses a log that changed since it was pushed unless `--amend`. From chat, scripts need `--incident <id>` (`SRE_HARNESS_NO_CURRENT`), because every session shares one current-incident pointer.
+`incident.py close` prints the close-out steps still to do. `audit.py commit` refuses an incident that is not resolved, because committing ends capture and the chat gateway then refuses every approval for it; close it first, or pass `--unresolved` (a person's call, refused from chat). It is safe to run again: it reports `preserved` or `pending`, and refuses a log that changed since it was pushed unless `--amend`. From chat, scripts need `--incident <id>` (`SRE_HARNESS_NO_CURRENT`), because every session shares one current-incident pointer.
 
 The log is spooled under `~/.local/state/sre-harness/` during the incident and committed at the end. A session is bound to an incident by a single-use token that `incident.py` issues. Every timeline entry pins the log's head hash and record count in its marker on the code host, so a later rewrite of the log shows up in `verify --check-anchors`. `commit` refuses a broken chain, a log that disagrees with its pinned hashes, or one with a secret left in it.
 
@@ -117,7 +117,10 @@ It only advises: it never approves, blocks or selects an action, never decides a
 ```bash
 uv run scripts/incident.py gc            # dry run: what would be cleared, and what is kept and why
 uv run scripts/incident.py gc --apply    # delete
+uv run scripts/incident.py gc --apply --incident <id>   # only this incident; repeat for more
 ```
+
+`--incident` limits the run to the incidents named: nothing else is assessed or touched, unused bind tokens are left alone, and an id with no local state is listed under `kept` as `no local state`.
 
 An incident is cleared only when all of these hold:
 
