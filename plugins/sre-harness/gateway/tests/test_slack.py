@@ -255,9 +255,16 @@ def test_mention_syntax_cannot_form():
     assert out.count("<" + ZW) == 4
 
 
-def test_code_is_left_alone():
-    text = "```\n<!channel> [a](https://evil.example)\n```\nand `<@U1> https://evil.example` here"
+def test_ordinary_code_is_left_alone():
+    text = "```bash\ncat <<EOF > f; a < b; xs[i](y)\n```\nand `kubectl get pods -o json | jq '.[0]'` here"
     assert block(text) == text
+
+
+def test_code_keeps_everything_except_what_could_become_a_mention_or_link():
+    out = block("```\n<!channel> [a](https://evil.example) <@U1>\n```\nand `<@U1>` here")
+    for token in ("<!", "<@", "](https"):
+        assert token not in out
+    assert "<" + ZW + "!channel>" in out
 
 
 def test_an_unclosed_inline_code_span_is_still_checked():
@@ -332,3 +339,31 @@ async def test_an_edit_sends_a_block_and_a_refused_one_clears_the_old_blocks():
     chat._client.chat_update = refuse_blocks  # pylint: disable=protected-access
     await chat.update(Posted("C1", "5.0"), "again")
     assert chat._client.calls[-1][1]["blocks"] == []  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "\\`<@U1>\\`",  # an escaped backtick opens nothing
+        "``x` <@U1> `",  # runs of different length do not pair
+        "`a``b` <@U1>",
+        "~~~\n```\n~~~\n<@U1>",  # a backtick line does not close a tilde fence
+        "````\n```\n````\n<@U1>",  # a shorter fence does not close a longer one
+        "```\n``` not a close\n```\n<@U1>",  # a closing fence has nothing after it
+        "    ```\n<@U1>",  # four spaces of indent is not a fence
+        "```<@U1>",  # the info string is not prose
+    ],
+)
+def test_no_reading_of_the_code_structure_lets_a_mention_through(text):
+    assert "<@" not in block(text)
+
+
+def test_tilde_and_longer_fences_hold_their_content_as_code():
+    text = "~~~\n[a](x) <b>\n~~~\n````\n```\n<b> y\n````"
+    assert block(text) == text
+
+
+def test_a_bare_www_address_is_clickable_only_on_a_listed_host():
+    assert block("see www.evil.example/x now") == "see `www.evil.example/x` now"
+    assert block("see www.grafana.net/x") == "see www.grafana.net/x"
+    assert block("awww.evil.example") == "awww.evil.example"

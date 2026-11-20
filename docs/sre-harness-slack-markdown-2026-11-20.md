@@ -10,8 +10,8 @@ The ticket asked what is needed for the gateway's Slack messages to use Markdown
 
 - Agent replies go out as a Slack `markdown` block (`to_markdown_block` in `slack.py`). The message `text` keeps the old escaped conversion as the notification text and as the fallback.
 - A reply over 12,000 characters, or a block Slack refuses, is sent as text. Edits send `blocks: []` on fallback so stale blocks do not stay.
-- Mentions cannot form: a `<` outside code gets a zero-width space after it.
-- New `chat.link_hosts` in `site.yaml` (schema, README, checked by `validate_site.py` through the schema). A Markdown link is clickable only for https URLs on a listed host (`*.suffix` for subdomains); other links show as `label (`url`)`; bare off-list URLs go in inline code; images and reference-style links are defused. Empty by default, so nothing is clickable until a site lists hosts.
+- Mentions cannot form: `<@`, `<!`, `<#` and `<scheme:` get a zero-width space after the `<`, in prose and in code (code is parsed per CommonMark; the extra step in code covers Slack reading it differently).
+- New `chat.link_hosts` in `site.yaml` (schema, README, checked by `validate_site.py` through the schema). A Markdown link is clickable only for https URLs on a listed host (`*.suffix` for subdomains); other links show as `label (`url`)`; bare off-list `https://` and `www.` addresses go in inline code; images and reference-style links are defused. Empty by default, so nothing is clickable until a site lists hosts.
 - The system prompt now tells the agent that tables, headings and quotes render, and that links are limited.
 - ADR 0024, README "Message formatting" section, CONTEXT.md term "Link allowlist". Plugin 0.21.0, gateway 0.16.0.
 

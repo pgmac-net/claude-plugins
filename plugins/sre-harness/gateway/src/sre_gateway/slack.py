@@ -208,6 +208,19 @@ def _prose(text: str, hosts: frozenset[str]) -> str:
             after = text.find("]", index) + 1
             if after and text[after : after + 1] in (":", "["):
                 out.append("\\")  # a reference-style link or definition
+        elif text.startswith("www.", index) and (
+            index == 0 or not (text[index - 1].isalnum() or text[index - 1] in "./-")
+        ):
+            end = index
+            while end < size and not text[end].isspace():
+                end += 1
+            url = text[index:end]
+            while url and url[-1] in URL_TRAILING:
+                url = url[:-1]
+            end = index + len(url)
+            out.append(url if link_allowed("https://" + url, hosts) else f"`{url.replace('`', '')}`")
+            index = end
+            continue
         elif text.startswith(("http://", "https://"), index):
             end = index
             while end < size and not text[end].isspace():
@@ -228,28 +241,117 @@ def _prose(text: str, hosts: frozenset[str]) -> str:
     return "".join(out)
 
 
+def _scheme_ahead(text: str, pos: int) -> bool:
+    """Whether a URL scheme ('https:', 'mailto:', 'javascript:') starts at text[pos]."""
+    stop = min(len(text), pos + 32)
+    end = pos
+    while end < stop and (text[end].isalnum() or text[end] in "+.-"):
+        end += 1
+    return end > pos and text[end : end + 1] == ":"
+
+
+def _code(text: str) -> str:
+    """Code is shown as written, except for what could become a mention or a link if Slack's idea of
+    where the code ends differs from ours: '<@', '<!', '<#', '<scheme:' and '](scheme:' get a
+    zero-width space. Ordinary code ('<<EOF', 'a < b', 'xs[i](y)') is untouched."""
+    out: list[str] = []
+    for index, char in enumerate(text):
+        out.append(char)
+        after = text[index + 1 : index + 2]
+        if char == "<" and (after in ("@", "!", "#") or _scheme_ahead(text, index + 1)):
+            out.append(ZERO_WIDTH)
+        elif char == "]" and after == "(" and _scheme_ahead(text, index + 2):
+            out.append(ZERO_WIDTH)
+    return "".join(out)
+
+
+def _backtick_runs(line: str) -> list[tuple[int, int]]:
+    """(start, length) of each run of backticks that is not backslash-escaped."""
+    runs: list[tuple[int, int]] = []
+    index, size = 0, len(line)
+    while index < size:
+        if line[index] == "\\" and line[index + 1 : index + 2] == "`":
+            index += 2
+        elif line[index] == "`":
+            end = index
+            while end < size and line[end] == "`":
+                end += 1
+            runs.append((index, end - index))
+            index = end
+        else:
+            index += 1
+    return runs
+
+
+def _spans(line: str, hosts: frozenset[str]) -> str:
+    """Prose and inline code spans, split the way Markdown does: a span opens with a run of N backticks
+    and closes at the next run of exactly N. A run with no partner is literal text."""
+    runs = _backtick_runs(line)
+    partner: list[int | None] = [None] * len(runs)
+    latest: dict[int, int] = {}
+    for index in range(len(runs) - 1, -1, -1):
+        partner[index] = latest.get(runs[index][1])
+        latest[runs[index][1]] = index
+    out: list[str] = []
+    position, index = 0, 0
+    while index < len(runs):
+        close = partner[index]
+        if close is None:
+            index += 1
+            continue
+        (start, size), (end, _) = runs[index], runs[close]
+        out.append(_prose(line[position:start], hosts))
+        out.append("`" * size + _code(line[start + size : end]) + "`" * size)
+        position = end + size
+        index = close + 1
+    out.append(_prose(line[position:], hosts))
+    return "".join(out)
+
+
+def _fence(line: str) -> tuple[str, int, str] | None:
+    """A code fence line: (character, length, info string), or None. Up to three spaces of indent, three
+    or more backticks or tildes, and a backtick fence's info string has no backtick."""
+    indent = len(line) - len(line.lstrip(" "))
+    rest = line[indent:]
+    if indent > 3 or rest[:1] not in ("`", "~"):
+        return None
+    char = rest[0]
+    size = len(rest) - len(rest.lstrip(char))
+    info = rest[size:].strip()
+    if size < 3 or (char == "`" and "`" in info):
+        return None
+    return char, size, info
+
+
 def _line(line: str, hosts: frozenset[str]) -> str:
     if len(line) > MAX_CONVERTED_LINE:
         # Too long to scan cheaply: break everything that could be a mention or a link.
-        return line.replace("<", "<" + ZERO_WIDTH).replace("[", "\\[").replace("http", "http" + ZERO_WIDTH)
-    parts = line.split("`")
-    for index, part in enumerate(parts):
-        unclosed = index == len(parts) - 1 and len(parts) % 2 == 0
-        if index % 2 == 0 or unclosed:
-            parts[index] = _prose(part, hosts)
-    return "`".join(parts)
+        blunt = line.replace("<", "<" + ZERO_WIDTH).replace("[", "\\[")
+        return blunt.replace("http", "http" + ZERO_WIDTH).replace("www.", "www" + ZERO_WIDTH + ".")
+    return _spans(line, hosts)
 
 
 def to_markdown_block(text: str, hosts: frozenset[str] = frozenset()) -> str:
-    """The agent's Markdown for Slack's `markdown` block. Code, fenced or inline, is left alone."""
+    """The agent's Markdown for Slack's `markdown` block.
+
+    Fences follow CommonMark (same character, at least as long, nothing after it). Anything the parse
+    treats as code still gets `_code`, so a different reading by Slack costs a stray invisible character,
+    not a mention.
+    """
     out: list[str] = []
-    in_code = False
+    open_fence: tuple[str, int] | None = None
     for line in text.split("\n"):
-        if line.lstrip().startswith("```"):
-            in_code = not in_code
-            out.append(line)
+        fence = _fence(line)
+        if open_fence is None:
+            if fence:
+                open_fence = fence[:2]
+                out.append(line[: len(line) - len(line.lstrip())] + fence[0] * fence[1] + _code(fence[2]))
+            else:
+                out.append(_line(line, hosts))
         else:
-            out.append(line if in_code else _line(line, hosts))
+            out.append(_code(line))
+            if fence and fence[0] == open_fence[0] and fence[1] >= open_fence[1] and not fence[2]:
+                open_fence = None
     return "\n".join(out)
 
 
