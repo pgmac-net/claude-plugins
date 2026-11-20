@@ -431,6 +431,30 @@ class TestAuditCli:
         assert "not allowed from chat" in capsys.readouterr().err
         assert not audit_hook.is_closed("catalog-5")
 
+    @staticmethod
+    def reopen() -> None:
+        path = sre_common.incident_state_path("catalog-5")
+        path.write_text(json.dumps({**json.loads(path.read_text()), "status": "open"}), encoding="utf-8")
+
+    @pytest.mark.usefixtures("remote")
+    def test_commit_refuses_an_incident_that_is_not_resolved(self, capsys):
+        self.reopen()
+        assert audit.main(["commit", "--no-pr", "--offline"]) == 2
+        err = capsys.readouterr().err
+        assert "catalog-5 is open, not resolved" in err and "incident.py close --incident catalog-5" in err
+        assert not audit_hook.is_closed("catalog-5")
+
+    @pytest.mark.usefixtures("remote")
+    def test_unresolved_commits_an_open_incident_but_not_from_chat(self, monkeypatch, capsys):
+        self.reopen()
+        monkeypatch.setenv(sre_common.NO_CURRENT_ENV, "1")
+        assert audit.main(["commit", "--incident", "catalog-5", "--no-pr", "--offline", "--unresolved"]) == 2
+        assert "not allowed from chat" in capsys.readouterr().err
+        assert not audit_hook.is_closed("catalog-5")
+        monkeypatch.delenv(sre_common.NO_CURRENT_ENV)
+        assert audit.main(["commit", "--no-pr", "--offline", "--unresolved"]) == 0
+        assert audit_hook.is_closed("catalog-5")
+
     @pytest.mark.usefixtures("remote")
     def test_a_stale_local_branch_does_not_block_a_commit(self, incident, capsys):
         subprocess.run(["git", "-C", str(incident), "branch", "audit/catalog-5"], check=True, capture_output=True)
@@ -457,7 +481,9 @@ class TestHardening:
     @pytest.mark.usefixtures("state")
     def test_a_secret_that_survived_redaction_blocks_publication(self, site, monkeypatch, capsys):
         monkeypatch.setenv("SRE_HARNESS_SITE", str(site))
-        sre_common.write_incident_state({"id": "catalog-5", "repo": "o/r", "number": 5, "url": "u", "title": "T"})
+        sre_common.write_incident_state(
+            {"id": "catalog-5", "repo": "o/r", "number": 5, "url": "u", "title": "T", "status": "resolved"}
+        )
         audit_hook.append("catalog-5", {"v": 1, "ts": "2026-01-02T03:04:05Z", "event": "note", "text": TOKEN})
         result = audit.verify(audit.read_log("catalog-5"))
         assert result["leftover_secrets"] == [{"line": 1, "looks_like": ["GitHub token"]}]

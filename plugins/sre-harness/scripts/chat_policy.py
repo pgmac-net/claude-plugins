@@ -65,6 +65,7 @@ HARNESS_CALLS = (
 # the option, so an abbreviation would also be caught if a parser allowed one.
 HARNESS_DENIED_OPTIONS = (
     ("audit.py commit", "--of"),
+    ("audit.py commit", "--unr"),
     ("incident.py gc", "--ig"),
 )
 

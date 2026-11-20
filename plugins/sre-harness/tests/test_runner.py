@@ -449,6 +449,7 @@ class TestGatewayRecords:
             ("push", "-u", "origin", "main"),
         ):
             git(*args)
+        assert incident.main(["close"]) == 0
         assert audit.main(["commit", "--no-pr", "--offline"]) == 0
         listed = subprocess.run(
             ["git", "-C", str(remote), "ls-tree", "--name-only", f"audit/{public['id']}", "audit/"],

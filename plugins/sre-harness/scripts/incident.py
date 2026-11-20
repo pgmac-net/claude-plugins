@@ -17,7 +17,8 @@ Commands:
   close    mark the incident resolved locally and in the body; the issue stays open
   promote  make an unattended triage (open --auto) a real incident on the site's tracker
   dismiss  close an unattended triage judged not to be an incident
-  gc       clear local state of incidents whose audit log has merged (dry run unless --apply)
+  gc       clear local state of incidents whose audit log has merged (dry run unless --apply;
+           --incident <id>, repeatable, clears only those)
 
 Exit codes: 0 ok, 2 the site or the code host could not be used, 3 open
 incidents already exist.
@@ -154,6 +155,13 @@ def read_field(body: str, name: str) -> str | None:
     """The value of one '**Name:** value' line, or None."""
     found = _field_pattern(name).search(body or "")
     return found.group(0).split(":** ", 1)[1].strip() if found else None
+
+
+def resolved_at_from_body(body: str | None) -> str | None:
+    """The UTC time in a body's '**Resolved:** 20:08 AEST (2026-11-19T10:08:12Z)' line, or None."""
+    value = read_field(body or "", "Resolved")
+    found = re.search(r"\((\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)\)", value or "")
+    return found.group(1) if found else None
 
 
 def known_services(site_root: Path, doc: dict[str, Any]) -> set[str]:
@@ -330,13 +338,25 @@ def cmd_attach(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     # What the issue says is refreshed; what only local state knows (status, resolution, triage, promotion) is kept.
     state = {**(known or {"opened_at": iso_utc(sre_common.parse_utc(issue["createdAt"])), "status": "open"})}
     state.update(from_issue)
+    if known is None and from_issue["phase"] == "Resolved":
+        # No local state to keep (cleared by gc, or another host): the body is all that says it was resolved.
+        state["status"] = "resolved"
+        stamp = resolved_at_from_body(issue["body"])
+        if stamp:
+            state["resolved_at"] = stamp
+        else:
+            print(f"{args.incident} is resolved but its body has no Resolved time; none recorded.", file=sys.stderr)
     resolved = state.get("status") == "resolved"
     if resolved and args.reopen:
         sre_common.check_triage_write(state)
         state["status"] = "open"
         state.pop("resolved_at", None)
-    start_capture(state, doc)
-    token = state.pop("bind")
+    # A resolved incident whose audit log is committed has nothing left to capture into: a bind token or an
+    # 'active' marker would only keep the hook switched on for an incident that cannot take more records.
+    token = None
+    if args.reopen or not resolved or not audit_hook.is_closed(args.incident):
+        start_capture(state, doc)
+        token = state.pop("bind")
     sre_common.write_incident_state(state)
     if resolved and args.reopen:
         import timeline  # noqa: PLC0415  pylint: disable=import-outside-toplevel
@@ -543,7 +563,7 @@ def cmd_gc(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     policy = state_gc.Policy(
         require_issue_closed=not args.ignore_issue_state, fetch=not args.no_fetch, token_days=args.token_days
     )
-    result = state_gc.run(doc, args.site_root, policy, apply=args.apply)
+    result = state_gc.run(doc, args.site_root, policy, apply=args.apply, only=args.only)
     if args.quiet:
         return 0
     print(json.dumps(result, indent=2))
@@ -552,7 +572,7 @@ def cmd_gc(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:  # pylint: disable=too-many-statements  # one line per option
+def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915  pylint: disable=too-many-statements
     # No abbreviated options: the chat policy matches option names as text (homelabia#273).
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--site", help="site repository path")
@@ -604,6 +624,13 @@ def build_parser() -> argparse.ArgumentParser:  # pylint: disable=too-many-state
     setter.set_defaults(run=cmd_set)
 
     gc = sub.add_parser("gc", help="clear local state of incidents whose audit log has merged", allow_abbrev=False)
+    gc.add_argument(
+        "--incident",
+        dest="only",
+        action="append",
+        metavar="ID",
+        help="clear only this incident (repeatable); the default is every incident",
+    )
     gc.add_argument("--apply", action="store_true", help="delete; the default is a dry run")
     gc.add_argument("--no-fetch", action="store_true", help="do not fetch the audit repository first")
     gc.add_argument("--ignore-issue-state", action="store_true", help="do not require the tracking issue to be closed")

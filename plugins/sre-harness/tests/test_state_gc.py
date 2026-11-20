@@ -343,6 +343,48 @@ class TestCommandLine:
         assert result["cleared"] == [done] and [k["id"] for k in result["kept"]] == [unmerged]
 
 
+class TestTargeted:
+    """gc --incident clears only the incidents named (homelabia#266)."""
+
+    def run(self, capsys, *argv: str) -> dict:
+        assert incident.main(["gc", "--no-fetch", *argv]) == 0
+        return json.loads(capsys.readouterr().out)
+
+    def test_only_the_named_incident_is_assessed_and_cleared(self, world, capsys):
+        named, other = world.incident(7), world.incident(8)
+        for incident_id in (named, other):
+            world.merge_audit(incident_id)
+        world.issues.update({7: "CLOSED", 8: "CLOSED"})
+        result = self.run(capsys, "--apply", "--incident", named)
+        assert result["cleared"] == [named] and result["kept"] == []
+        assert audit_hook.spool_path(other).is_file() and sre_common.incident_state_path(other).is_file()
+        assert not audit_hook.spool_path(named).exists()
+
+    def test_the_flag_repeats(self, world, capsys):
+        ids = [world.incident(7), world.incident(8), world.incident(9)]
+        for incident_id in ids:
+            world.merge_audit(incident_id)
+        world.issues.update({7: "CLOSED", 8: "CLOSED", 9: "CLOSED"})
+        result = self.run(capsys, "--incident", ids[0], "--incident", ids[2])
+        assert result["cleared"] == [ids[0], ids[2]]
+
+    @pytest.mark.usefixtures("world")
+    def test_an_unknown_id_is_kept_with_a_reason_not_an_error(self, capsys):
+        result = self.run(capsys, "--incident", "incidents-99")
+        assert result["cleared"] == [] and result["kept"] == [{"id": "incidents-99", "reason": "no local state"}]
+
+    def test_a_targeted_run_leaves_other_incidents_unused_bind_tokens(self, world, capsys):
+        named = world.incident(7)
+        world.merge_audit(named)
+        world.issues[7] = "CLOSED"
+        stale = world.state / "binds" / ("f" * 32)
+        stale.write_text("incidents-50\n", encoding="utf-8")
+        old = time.time() - 30 * 86400
+        os.utime(stale, (old, old))
+        assert self.run(capsys, "--apply", "--incident", named)["stale_tokens"] == 0
+        assert stale.is_file()
+
+
 class TestAtIncidentStart:
     def test_open_clears_old_merged_incidents_and_still_prints_json(self, world, capsys, monkeypatch):
         old = world.incident(7)

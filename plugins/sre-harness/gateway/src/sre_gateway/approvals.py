@@ -21,6 +21,7 @@ from sre_gateway.chat import ApprovalView, ChatAdapter, Click, Place, Posted
 log = logging.getLogger(__name__)
 
 SUMMARY_LIMIT = 1500
+WHY_LIMIT = 300
 CLOSED_REFUSAL = (
     "Refused: the audit log of {incident} is committed and closed, so no approval can be recorded. "
     "Do not retry; a person can run it from a terminal, or start a new incident with /incident."
@@ -176,10 +177,11 @@ class ApprovalBroker:
         name = await self._name(click.user)
         try:
             self._write(pending, outcome, click.user, click.reason)
-        except Exception:  # noqa: BLE001  pylint: disable=broad-exception-caught
+        except Exception as exc:  # noqa: BLE001  pylint: disable=broad-exception-caught
             log.exception("could not record a decision")
-            await self._close(pending, f"{name} answered, but the decision could not be recorded. Refused.")
-            pending.done.set_result(PermissionAnswer(False, "Refused: the approval could not be recorded."))
+            why = self._why(exc)
+            await self._close(pending, f"{name} answered, but the decision could not be recorded ({why}). Refused.")
+            pending.done.set_result(PermissionAnswer(False, f"Refused: the approval could not be recorded: {why}"))
             return
         if outcome == "approved":
             await self._close(pending, f"Approved by {name}.")
@@ -188,6 +190,11 @@ class ApprovalBroker:
             reason = f": {self._scrub(click.reason)[:500]}" if click.reason else ""
             await self._close(pending, f"Denied by {name}{reason}")
             pending.done.set_result(PermissionAnswer(False, f"Refused by {name}{reason}"))
+
+    def _why(self, exc: Exception) -> str:
+        """Why a decision could not be written, scrubbed and short enough for a card (homelabia#266)."""
+        text = self._scrub(str(exc)).strip() or type(exc).__name__
+        return text if len(text) <= WHY_LIMIT else text[: WHY_LIMIT - 1] + "…"
 
     def _write(self, pending: _Pending, outcome: str, approver: str | None, reason: str | None) -> None:
         link = pending.link

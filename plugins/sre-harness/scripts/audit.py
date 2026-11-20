@@ -517,6 +517,14 @@ def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, A
     if args.offline and sre_common.from_chat():
         # The deny rule is text matching; this is the control.
         raise SiteError("--offline skips the check against the timeline's pinned hashes and is not allowed from chat")
+    if args.unresolved and sre_common.from_chat():
+        raise SiteError("--unresolved commits the log of an open incident and is not allowed from chat")
+    if state.get("status", "open") != "resolved" and not args.unresolved:
+        # Committing stops capture, and the gateway then refuses every approval for the incident (homelabia#266).
+        raise SiteError(
+            f"{incident_id} is {state.get('status', 'open')}, not resolved: committing its log would end capture "
+            f"and stop approvals being recorded. Run incident.py close --incident {incident_id} first"
+        )
     # A promoted incident began as an unattended triage: its log is the first part of this one's, and goes with it.
     earlier = sre_common.read_incident_state(state["promoted_from"]) if state.get("promoted_from") else None
     if earlier is not None and not audit_hook.spool_path(earlier["id"]).is_file():
@@ -711,6 +719,11 @@ def build_parser() -> argparse.ArgumentParser:
     commit.add_argument("--offline", action="store_true", help="skip the comparison with the timeline's pinned hashes")
     commit.add_argument(
         "--amend", action="store_true", help="the log changed since it was committed: push it to the same branch"
+    )
+    commit.add_argument(
+        "--unresolved",
+        action="store_true",
+        help="commit the log of an incident that is not resolved (ends capture; not allowed from chat)",
     )
     commit.set_defaults(run=cmd_commit)
     sre_common.incident_after_subcommand(sub)

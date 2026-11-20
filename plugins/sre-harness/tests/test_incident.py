@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
+import audit_hook
 import incident
 import pytest
 import sre_common
@@ -237,6 +238,62 @@ def test_attach_keeps_a_resolved_incident_resolved(gh, capsys):
     assert (state["status"], state["resolved_at"]) == ("resolved", resolved_at)
     assert "Pass --reopen to reopen it" in capsys.readouterr().err
     assert not gh.comments
+
+
+def resolved_body(gh, line: bool = True) -> None:
+    """The issue body of an incident closed on another host: Phase Resolved, and maybe a Resolved time."""
+    open_one()
+    incident.main(["close"])
+    gh.body = gh.body.replace("**Phase:** Establishing picture", "**Phase:** Resolved")
+    if not line:
+        gh.body = "\n".join(row for row in gh.body.splitlines() if not row.startswith("**Resolved:**"))
+    sre_common.incident_state_path("incidents-41").unlink()
+    (sre_common.state_dir() / "current").unlink()
+
+
+def test_attach_without_local_state_keeps_a_resolved_body_resolved(gh, capsys):
+    resolved_body(gh)
+    stamp = incident.resolved_at_from_body(gh.body)
+    assert stamp and stamp.endswith("Z")
+    capsys.readouterr()
+    assert incident.main(["attach", "incidents-41"]) == 0
+    state = sre_common.read_incident_state("incidents-41")
+    assert (state["status"], state["resolved_at"]) == ("resolved", stamp)
+
+
+def test_attach_without_local_state_and_no_resolved_time_says_so(gh, capsys):
+    resolved_body(gh, line=False)
+    capsys.readouterr()
+    assert incident.main(["attach", "incidents-41"]) == 0
+    state = sre_common.read_incident_state("incidents-41")
+    assert state["status"] == "resolved" and "resolved_at" not in state
+    assert "no Resolved time" in capsys.readouterr().err
+
+
+def test_attach_to_a_resolved_incident_with_a_closed_log_starts_no_capture(gh, capsys):
+    resolved_body(gh)
+    spool = audit_hook.spool_path("incidents-41")
+    spool.parent.mkdir(parents=True, exist_ok=True)
+    spool.write_text("{}\n", encoding="utf-8")
+    spool.with_suffix(".closed").write_text("committed\n", encoding="utf-8")
+    (sre_common.state_dir() / "active").unlink(missing_ok=True)
+    for leftover in (sre_common.state_dir() / "binds").glob("*"):  # the token from open_one
+        leftover.unlink()
+    capsys.readouterr()
+    assert incident.main(["attach", "incidents-41"]) == 0
+    assert json.loads(capsys.readouterr().out.splitlines()[0])["bind"] is None
+    assert not (sre_common.state_dir() / "active").exists()
+    assert not any((sre_common.state_dir() / "binds").glob("*"))
+
+
+def test_attach_to_a_resolved_incident_with_an_open_log_still_binds(gh, capsys):
+    resolved_body(gh)
+    spool = audit_hook.spool_path("incidents-41")
+    spool.parent.mkdir(parents=True, exist_ok=True)
+    spool.write_text("{}\n", encoding="utf-8")
+    capsys.readouterr()
+    assert incident.main(["attach", "incidents-41"]) == 0
+    assert len(json.loads(capsys.readouterr().out.splitlines()[0])["bind"]) == 32
 
 
 def test_attach_reopen_reopens_and_says_so_in_the_timeline(gh):
