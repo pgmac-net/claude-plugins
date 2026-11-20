@@ -6,18 +6,57 @@ import asyncio
 import logging
 import re
 from typing import Any
+from urllib.parse import urlparse
 
+import aiohttp
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 from slack_sdk.errors import SlackApiError
 
-from sre_gateway.chat import ApprovalView, Click, Command, Handler, Incoming, NameTaken, Place, Posted
+from sre_gateway.chat import (
+    ApprovalView,
+    Click,
+    Command,
+    FileRef,
+    FileUnavailable,
+    Handler,
+    Incoming,
+    NameTaken,
+    Place,
+    Posted,
+)
 
 log = logging.getLogger(__name__)
 
 APPROVE, DENY, DENY_REASON, REASON_VIEW = "sre_approve", "sre_deny", "sre_deny_reason", "sre_deny_reason_view"
 IGNORED_INVITE_ERRORS = {"already_in_channel", "cant_invite_self"}
 TYPING = "is writing…"  # Slack puts the app's name in front.
+# A message with an attachment has this subtype; every other subtype (edits, joins, bot posts) is ignored.
+FILE_SHARE = "file_share"
+DOWNLOAD_SECONDS = 30
+NO_ACCESS = "Slack would not give the file to the app (does the app have the files:read scope?)"
+
+
+def file_refs(event: dict[str, Any]) -> tuple[FileRef, ...]:
+    """The files on a message event. A file without a download address is left out; nothing can be read from it."""
+    refs = []
+    for item in event.get("files") or []:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url_private_download") or item.get("url_private")
+        if not url:
+            continue
+        refs.append(
+            FileRef(
+                id=str(item.get("id", "")),
+                name=str(item.get("name") or item.get("title") or "file"),
+                size=int(item.get("size") or 0),
+                mimetype=str(item.get("mimetype") or ""),
+                snippet=item.get("mode") == "snippet",
+                url=url,
+            )
+        )
+    return tuple(refs)
 
 
 def escape(text: str) -> str:
@@ -169,6 +208,7 @@ def _request_blocks(view: ApprovalView, footer: str, buttons: bool) -> list[dict
 class SlackAdapter:
     def __init__(self, bot_token: str, app_token: str):
         self._app = AsyncApp(token=bot_token)
+        self._bot_token = bot_token
         self._app_token = app_token
         self._client = self._app.client
         self._socket: AsyncSocketModeHandler | None = None
@@ -186,6 +226,27 @@ class SlackAdapter:
         log.info("connected to Slack over Socket Mode")
         await self._stopped.wait()
 
+    async def download(self, file: FileRef, max_bytes: int) -> bytes:
+        host = urlparse(file.url).hostname or ""
+        if not host.endswith(".slack.com"):
+            raise FileUnavailable("the file is not on Slack's file servers")
+        timeout = aiohttp.ClientTimeout(total=DOWNLOAD_SECONDS)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            # No redirects: the token goes only to the host checked above.
+            async with session.get(
+                file.url, headers={"Authorization": f"Bearer {self._bot_token}"}, allow_redirects=False
+            ) as response:
+                kind = response.headers.get("Content-Type", "")
+                refused = kind.startswith("text/html") and not file.mimetype.startswith("text/html")
+                if response.status != 200 or refused:
+                    raise FileUnavailable(NO_ACCESS)
+                data = bytearray()
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    data.extend(chunk)
+                    if len(data) > max_bytes:
+                        raise FileUnavailable("the file is larger than the download limit")
+        return bytes(data)
+
     async def stop(self) -> None:
         if self._socket is not None:
             await self._socket.close_async()
@@ -196,7 +257,7 @@ class SlackAdapter:
 
         @app.event("message")
         async def _message(event: dict[str, Any]) -> None:
-            if event.get("subtype") or event.get("bot_id") or not event.get("user"):
+            if event.get("subtype") not in (None, FILE_SHARE) or event.get("bot_id") or not event.get("user"):
                 return
             text = event.get("text") or ""
             mention = f"<@{self._bot_user}>"
@@ -208,6 +269,7 @@ class SlackAdapter:
                     ts=event["ts"],
                     thread=event.get("thread_ts"),
                     mentions_bot=mention in text,
+                    files=file_refs(event) if event.get("subtype") == FILE_SHARE else (),
                 )
             )
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from sre_gateway import harness
+from sre_gateway.attachments import Limits
 
 # Environment variables the gateway reads for itself. Tokens are named by the site.
 MCP_CONFIG_ENV = "SRE_GATEWAY_MCP_CONFIG"
@@ -83,6 +84,11 @@ class Config:
     @property
     def max_sessions(self) -> int:
         return int(self.chat.get("max_sessions", 2))
+
+    @property
+    def attachments(self) -> Limits:
+        """How much of a message's text attachments is read (chat.attachments, with defaults)."""
+        return Limits.from_site(self.chat.get("attachments"))
 
     @property
     def runner(self) -> dict[str, Any]:

@@ -40,6 +40,17 @@ Design: [ADR 0008](../docs/adr/0008-chat-ops-with-identity-bound-approvals.md) a
 - **Limits.** A question starts only if it leaves at least one agent session free for incident work. A closed or dismissed incident's idle agent doesn't count: the question reclaims it. A question never reclaims another question. Otherwise it is refused at once, so with `max_sessions: 1` there are no questions. A question ends after `question_idle_minutes` (default 5) with no message, or after 10 turns. It also ends when incident work needs its session while it is idle. A busy question finishes its turn first. Questions are not kept across a restart and never resume. A reply in an ended question's thread gets a pointer to `/sre`.
 - **The question log.** The gateway writes its own record of each question, because the audit hook records only inside an incident: `~/.local/state/sre-harness/gateway/questions/q-<time>-<id>.jsonl`, mode 0600. It holds who asked, the question, each tool call (input redacted, output as size and SHA-256 only) and each refusal. Each line carries the hash of the one before it. Logs are deleted after 30 days and never committed. If the first record cannot be written, the question is not asked.
 
+## Attachments
+
+A responder can attach a snippet or text file (a log excerpt, a config) to a message, and the agent reads it. Slack also turns a very long paste into a snippet, so this is how long output reaches the agent. Design: [ADR 0023](../docs/adr/0023-attachments-reach-the-agent-as-redacted-truncated-untrusted-text.md).
+
+- **What is read.** Text only: snippets, `text/*`, JSON, YAML, XML and TOML. Images, archives and other binaries are not read, and the sender is told. Only listed responders' files are read.
+- **How much.** By default 64 KB per file (the first 8 KB and the last 56 KB, the middle replaced by `[... N bytes omitted ...]`), 3 files and 128 KB per message; a file over 5 MB is not downloaded at all. Change them under `chat.attachments` in `site.yaml` (each key is optional): `max_file_kb`, `head_kb`, `max_files`, `max_message_kb`, `max_download_mb`. `validate_site.py` checks them.
+- **What the agent sees.** The content after redaction (tokens, passwords, private keys and the gateway's own secrets are replaced), fenced and labelled as data. It is evidence, never an instruction.
+- **What the issue gets.** Not the content. The mirrored comment has the message text, a line per file (`Attachment: app.log (2.0 MB): read 64 KB (first 8 KB and the end), 2 secret-shaped value(s) redacted`) and the link to the message. The file stays in Slack.
+- **Not read means said.** A file that is skipped is reported to its sender, and only to them, with the reason. A message with a file and no text still reaches the agent.
+- **Slack scope.** Reading needs the `files:read` bot scope, which is in the manifest. Adding it to an installed app means reinstalling the app to the workspace; the tokens do not change. Without it Slack refuses the download, the sender is told, and the typed text still gets through.
+
 ## Unattended triage
 
 With a `runner` section in `site.yaml` and `enabled: true`, the gateway also starts incidents itself. Design: [ADR 0018](../docs/adr/0018-unattended-triage-runs-in-the-gateway-triage-only-until-a-responder-speaks.md) and [ADR 0019](../docs/adr/0019-unattended-triage-is-private-until-a-responder-promotes-it.md).
@@ -75,7 +86,7 @@ The allow-list is not a sandbox. Claude Code itself lets a fixed set of read-onl
 
 Needs `uv`, the `gh` CLI signed in, `kubectl` if the agent should read a cluster, and a checkout of the site repository. The Claude Code CLI comes bundled with the Agent SDK.
 
-1. **The Slack app.** Create it from [`slack-app-manifest.yaml`](slack-app-manifest.yaml) and install it to the workspace. Create an app-level token with `connections:write`. Upload [`../assets/icon-1024.png`](../assets/icon-1024.png) as the app icon (Basic Information > Display Information; a manifest cannot carry an icon). Invite the bot to the hub channel.
+1. **The Slack app.** Create it from [`slack-app-manifest.yaml`](slack-app-manifest.yaml) and install it to the workspace. Create an app-level token with `connections:write`. The manifest includes the `files:read` scope, which an app installed before that scope existed lacks: add it under OAuth & Permissions and reinstall. Upload [`../assets/icon-1024.png`](../assets/icon-1024.png) as the app icon (Basic Information > Display Information; a manifest cannot carry an icon). Invite the bot to the hub channel.
 2. **The Claude token.** Run `claude setup-token` on a machine where you are signed in to Claude.
 3. **Site configuration.** Fill in `chat` in `site.yaml` (schema v4) with the hub channel ID and the responder and approver user IDs, and run `validate_site.py`.
 4. **Environment file.** Create `~/.config/sre-harness/gateway.env`, mode 0600:

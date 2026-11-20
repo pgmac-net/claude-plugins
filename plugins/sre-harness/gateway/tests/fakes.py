@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sre_gateway.agent import AskPermission, Event, PermissionAnswer, TurnEnd
-from sre_gateway.chat import ApprovalView, NameTaken, Place, Posted
+from sre_gateway.chat import ApprovalView, FileRef, FileUnavailable, NameTaken, Place, Posted
 from sre_gateway.indicator import NAME
 
 INDICATOR_PREFIX = f"{NAME} is "
@@ -27,6 +27,10 @@ class FakeChat:  # pylint: disable=too-many-instance-attributes
     archived: list[str] = field(default_factory=list)
     taken: set[str] = field(default_factory=set)
     fail_create: bool = False
+    # Attachments: file id -> content, file id -> why it cannot be fetched, and the ids fetched.
+    files: dict[str, bytes] = field(default_factory=dict)
+    unavailable: dict[str, str] = field(default_factory=dict)
+    downloads: list[str] = field(default_factory=list)
     handler: Any = None
     _ts: int = 0
 
@@ -122,6 +126,12 @@ class FakeChat:  # pylint: disable=too-many-instance-attributes
 
     def channel_link(self, channel: str) -> str:
         return f"#{channel}"
+
+    async def download(self, file: FileRef, max_bytes: int) -> bytes:
+        self.downloads.append(file.id)
+        if file.id in self.unavailable:
+            raise FileUnavailable(self.unavailable[file.id])
+        return self.files[file.id][: max_bytes + 1]
 
     def texts(self) -> list[str]:
         return [text for _place, text in self.posts]

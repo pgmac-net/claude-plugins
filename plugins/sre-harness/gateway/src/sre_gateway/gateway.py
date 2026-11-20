@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from sre_gateway import harness, prompts, questions
+from sre_gateway import attachments, harness, prompts, questions
 from sre_gateway.agent import (
     AgentDriver,
     AskPermission,
@@ -32,6 +32,7 @@ from sre_gateway.agent import (
     TurnEnd,
 )
 from sre_gateway.approvals import ApprovalBroker, Decision, Recorder
+from sre_gateway.attachments import Limits
 from sre_gateway.chat import ChatAdapter, Click, Command, Incoming, NameTaken, Place, Posted
 from sre_gateway.indicator import THINKING, IndicatedChat, Indicator, activity_for
 from sre_gateway.runner import Alert, Runner
@@ -86,6 +87,7 @@ class Settings:
     max_sessions: int
     state_dir: Path
     question_idle_seconds: int = 300
+    attachments: Limits = Limits()
 
 
 @dataclass
@@ -259,14 +261,35 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             return
         session = self._find(message)
         if session is not None:
-            await self._converse(session, message)
+            reads = await self._read_files(message, session.place)
+            await self._converse(session, message, reads)
         elif message.thread is not None and f"{message.channel}:{message.thread}" in self._ended_questions:
             await self.chat.tell(Place(message.channel, message.thread), message.user, QUESTION_ENDED)
         elif message.channel == self.settings.hub and message.thread is None and message.mentions_bot:
             text, drill = self._drill(message.text)
-            if text:
+            if text or message.files:
+                place = Place(self.settings.hub, message.ts)
+                reads = await self._read_files(message, place)
                 name = await self._name(message.user)
-                await self._start(message.user, name, text, Place(self.settings.hub, message.ts), drill)
+                await self._start(message.user, name, self._with_files(text, reads), place, drill)
+
+    async def _read_files(self, message: Incoming, place: Place) -> list[attachments.Read]:
+        """Read a message's text attachments (ADR 0023); say to its sender, and only them, what was not read."""
+        if not message.files:
+            return []
+        reads = await attachments.read_all(message.files, self.settings.attachments, self.chat.download, self._scrub)
+        notice = attachments.skipped_notice(reads)
+        if notice:
+            with contextlib.suppress(Exception):
+                await self.chat.tell(place, message.user, notice)
+        return reads
+
+    @staticmethod
+    def _with_files(text: str, reads: list[attachments.Read]) -> str:
+        """A message's text followed by its attachments as the agent should see them."""
+        if not reads:
+            return text
+        return f"{text or '(no text)'}\n\n{attachments.prompt_block(reads)}"
 
     async def on_click(self, click: Click) -> None:
         await self.broker.on_click(click)
@@ -303,23 +326,26 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         self._save()
         await session.queue.put(prompts.first_message(name, text, drill))
 
-    async def _converse(self, session: Session, message: Incoming) -> None:
+    async def _converse(self, session: Session, message: Incoming, reads: list[attachments.Read] | None = None) -> None:
+        reads = reads or []
         text = message.text.strip()
-        if text.lower() in STATUS_WORDS:
+        if not reads and text.lower() in STATUS_WORDS:
             await self.chat.post(session.place, self.status(session))
             return
         name = await self._name(message.user)
         if session.conv.incident:
-            await self._mirror(session, message, name)
+            await self._mirror(session, message, name, reads)
+        heard = self._with_files(text, reads)
         if session.conv.policy == TRIAGE:
             await self._end_triage(session, message, name)
-            await session.queue.put(prompts.joined_message(name, text))
+            await session.queue.put(prompts.joined_message(name, heard))
             return
         if session.question:
-            self._log_question(session, "message", message.user, text)
+            logged = "\n".join([text, *attachments.metadata_lines(reads)])
+            self._log_question(session, "message", message.user, logged)
         if session.busy:
             await self.chat.tell(session.place, message.user, "Queued: the agent is still on the previous message.")
-        await session.queue.put(f"[chat] {name}: {text}")
+        await session.queue.put(f"[chat] {name}: {heard}")
 
     # --- questions -----------------------------------------------------------------
 
@@ -528,12 +554,20 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
             await self._announce("The alert source is readable again; triage resumes.")
         await self.on_alerts(selection.start)
 
-    async def _mirror(self, session: Session, message: Incoming, name: str) -> None:
-        """Copy a person's message to the tracking issue, so the issue stays the record."""
+    async def _mirror(
+        self, session: Session, message: Incoming, name: str, reads: list[attachments.Read] | None = None
+    ) -> None:
+        """Copy a person's message to the tracking issue, so the issue stays the record.
+
+        An attachment is described, never copied: a log can hold a secret the redaction misses, and the issue is
+        not the place for it. The link leads to the original in chat (ADR 0023).
+        """
         link = None
         with contextlib.suppress(Exception):
             link = await self.chat.permalink(Posted(message.channel, message.ts))
-        body = f"**{name}** (chat): {self._scrub(message.text.strip())}"
+        body = f"**{name}** (chat): {self._scrub(message.text.strip()) or ('(no text)' if reads else '')}"
+        for line in attachments.metadata_lines(reads or []):
+            body += f"\n\n{line}"
         if link:
             body += f"\n\n[message]({link})"
         try:

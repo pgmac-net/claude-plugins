@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import validate_site as vs
 import yaml
+from test_runner import CHAT  # pylint: disable=wrong-import-order
 
 
 def errors_for(site: Path) -> list[str]:
@@ -205,3 +206,32 @@ class TestIncidentSection:
         assert summary["timezone"] == "Etc/UTC"
         assert summary["update_minutes"] == {"P1": 30, "P2": 60, "P3": 240}
         assert summary["drill"] == "catalog (drill)"
+
+
+class TestChatAttachments:
+    def errors(self, edit_site, attachments):
+        chat = {**CHAT, "attachments": attachments}
+        return [err for err in errors_for(edit_site(lambda doc: doc.update({"chat": chat}))) if "attachments" in err]
+
+    def test_the_defaults_and_a_custom_set_are_valid(self, edit_site):
+        assert self.errors(edit_site, {}) == []
+        custom = {"max_file_kb": 32, "head_kb": 4, "max_files": 5, "max_message_kb": 64, "max_download_mb": 2}
+        assert self.errors(edit_site, custom) == []
+
+    def test_an_unknown_key_is_rejected(self, edit_site):
+        assert self.errors(edit_site, {"max_files_kb": 5})
+
+    @pytest.mark.parametrize(
+        "bad",
+        [{"max_file_kb": 0}, {"max_files": 0}, {"max_download_mb": 51}, {"max_file_kb": "big"}, {"head_kb": -1}],
+    )
+    def test_out_of_range_values_are_rejected(self, edit_site, bad):
+        assert self.errors(edit_site, bad)
+
+    def test_the_head_cannot_exceed_the_file_cap(self, edit_site):
+        errors = self.errors(edit_site, {"max_file_kb": 8, "head_kb": 16})
+        assert errors == ["site.yaml: chat/attachments/head_kb: larger than max_file_kb"]
+
+    def test_the_message_cap_cannot_be_below_the_file_cap(self, edit_site):
+        errors = self.errors(edit_site, {"max_file_kb": 100, "max_message_kb": 50})
+        assert errors == ["site.yaml: chat/attachments/max_message_kb: smaller than max_file_kb"]

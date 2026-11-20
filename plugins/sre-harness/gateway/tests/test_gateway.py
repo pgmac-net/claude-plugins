@@ -10,6 +10,7 @@ import pytest
 
 from fakes import FakeChat, FakeTracker, driver_factory, settle
 from sre_gateway.agent import Notice, Text, ToolCall, ToolOutput, TurnEnd
+from sre_gateway.attachments import Limits
 from sre_gateway.chat import Click, Command, Incoming
 from sre_gateway.gateway import Gateway, Settings, channel_name, chunks
 from sre_gateway.store import Store
@@ -58,6 +59,7 @@ def make(state, script, log, **overrides):
         max_sessions=overrides.pop("max_sessions", 2),
         state_dir=state / "gateway",
         question_idle_seconds=overrides.pop("question_idle", 600),
+        attachments=overrides.pop("attachments", Limits()),
     )
     chat, tracker = overrides.pop("chat", FakeChat()), overrides.pop("tracker", FakeTracker())
     records = []
@@ -67,7 +69,7 @@ def make(state, script, log, **overrides):
         tracker=tracker,
         driver_factory=driver_factory(script, log),
         record=records.append,
-        scrub=lambda text: text.replace(TOKEN, "[REDACTED]"),
+        scrub=overrides.pop("scrub", lambda text: text.replace(TOKEN, "[REDACTED]")),
         runner=overrides.pop("runner", None),
         record_policy=overrides.pop("record_policy", None),
         env_values=overrides.pop("env_values", None),

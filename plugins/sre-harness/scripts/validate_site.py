@@ -259,6 +259,12 @@ def check_chat(doc: dict[str, Any]) -> tuple[list[str], list[str], dict[str, Any
     errors += [f"chat/approvers/{index}: not listed in chat/responders" for index in outsiders]
     if len(set(chat["secrets_env"].values())) < len(chat["secrets_env"]):
         errors.append("chat/secrets_env: each token needs its own environment variable")
+    sizes = chat.get("attachments") or {}
+    max_file = sizes.get("max_file_kb", 64)
+    if sizes.get("head_kb", 8) > max_file:
+        errors.append("chat/attachments/head_kb: larger than max_file_kb")
+    if sizes.get("max_message_kb", 128) < max_file:
+        errors.append("chat/attachments/max_message_kb: smaller than max_file_kb")
     rule_errors, rule_warnings = chat_policy.site_findings(chat)
     errors += rule_errors
     return (
