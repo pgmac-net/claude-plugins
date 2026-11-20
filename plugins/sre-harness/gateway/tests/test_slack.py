@@ -240,7 +240,7 @@ def test_an_image_is_only_a_link():
 
 
 def test_a_bare_url_is_clickable_only_on_a_listed_host():
-    assert block("see https://github.com/x.") == "see https://github.com/x."
+    assert block("see https://github.com/x.") == "see [https://github.com/x](https://github.com/x)."
     assert block("see https://evil.example/x, ok") == "see `https://evil.example/x`, ok"
 
 
@@ -371,5 +371,30 @@ def test_tilde_and_longer_fences_hold_their_content_as_code():
 
 def test_a_bare_www_address_is_clickable_only_on_a_listed_host():
     assert block("see www.evil.example/x now") == "see `www.evil.example/x` now"
-    assert block("see www.grafana.net/x") == "see www.grafana.net/x"
+    assert block("see www.grafana.net/x") == "see [www.grafana.net/x](https://www.grafana.net/x)"
     assert block("awww.evil.example") == "awww.evil.example"
+
+
+def test_a_listed_address_in_backticks_becomes_a_link():
+    assert block("at `https://github.com/a/b`.") == "at [https://github.com/a/b](https://github.com/a/b)."
+    assert block("`www.grafana.net/d`") == "[www.grafana.net/d](https://www.grafana.net/d)"
+    assert block("**`https://github.com/a`**") == "**[https://github.com/a](https://github.com/a)**"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "`https://evil.example/x`",  # not listed
+        "`http://github.com/x`",  # not https
+        "`https://github.com/x y`",  # more than an address
+        "`git clone https://github.com/a/b`",  # a command, not an address
+        "`https://github.com/a_(b)`",  # could end the link early
+        "``https://github.com/a``",  # a double-backtick span is left as code
+    ],
+)
+def test_other_code_spans_stay_code(text):
+    assert block(text) == text
+
+
+def test_an_http_address_on_a_listed_host_is_shown_not_linked():
+    assert block("http://github.com/x") == "`http://github.com/x`"

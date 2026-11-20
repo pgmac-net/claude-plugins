@@ -171,6 +171,21 @@ def link_allowed(url: str, hosts: frozenset[str]) -> bool:
     return host in hosts or any(entry.startswith("*.") and host.endswith(entry[1:]) for entry in hosts)
 
 
+LINK_BREAKERS = set('()[]<> \t`"')
+
+
+def _clickable(url: str, hosts: frozenset[str]) -> str | None:
+    """A URL as an explicit Markdown link when its host is listed, else None.
+
+    The agent often writes an address bare or in backticks, and neither is a link in a markdown block.
+    A 'www.' address gets https. An address holding a character that could end the link early is left alone.
+    """
+    target = url if url.startswith(("http://", "https://")) else "https://" + url
+    if not url or LINK_BREAKERS & set(url) or not link_allowed(target, hosts):
+        return None
+    return f"[{url}]({target})"
+
+
 def _inline_link(text: str, start: int, hosts: frozenset[str]) -> tuple[int, str] | None:
     """A '[label](url)' at text[start], as (end, replacement). Unlisted hosts lose the link, not the URL."""
     mid = text.find("](", start)
@@ -218,7 +233,7 @@ def _prose(text: str, hosts: frozenset[str]) -> str:
             while url and url[-1] in URL_TRAILING:
                 url = url[:-1]
             end = index + len(url)
-            out.append(url if link_allowed("https://" + url, hosts) else f"`{url.replace('`', '')}`")
+            out.append(_clickable(url, hosts) or f"`{url.replace('`', '')}`")
             index = end
             continue
         elif text.startswith(("http://", "https://"), index):
@@ -229,7 +244,7 @@ def _prose(text: str, hosts: frozenset[str]) -> str:
             while url and url[-1] in URL_TRAILING:
                 url = url[:-1]
             end = index + len(url)
-            out.append(url if link_allowed(url, hosts) else f"`{url.replace('`', '')}`")
+            out.append(_clickable(url, hosts) or f"`{url.replace('`', '')}`")
             index = end
             continue
         elif char == "<":
@@ -301,7 +316,8 @@ def _spans(line: str, hosts: frozenset[str]) -> str:
             continue
         (start, size), (end, _) = runs[index], runs[close]
         out.append(_prose(line[position:start], hosts))
-        out.append("`" * size + _code(line[start + size : end]) + "`" * size)
+        inner = line[start + size : end]
+        out.append((size == 1 and _clickable(inner, hosts)) or "`" * size + _code(inner) + "`" * size)
         position = end + size
         index = close + 1
     out.append(_prose(line[position:], hosts))
