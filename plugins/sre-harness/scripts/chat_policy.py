@@ -204,12 +204,7 @@ REMOTE_SHELLS = frozenset({"ssh", "mosh"})
 
 def harness_rules(scripts_dir: Path = SCRIPTS) -> list[str]:
     """Allow rules for the harness's own scripts, by absolute path."""
-    found = []
-    for call in HARNESS_CALLS:
-        script, _, rest = call.partition(" ")
-        prefix = f"uv run {scripts_dir / script}"
-        found.append(f"Bash({prefix} {rest} *)" if rest else f"Bash({prefix} *)")
-    return found
+    return harness_rules_for(HARNESS_CALLS, scripts_dir)
 
 
 def default_allow(scripts_dir: Path = SCRIPTS) -> list[str]:
@@ -332,7 +327,49 @@ TRIAGE_WITHHELD = (
 )
 
 
-def settings_json(chat: dict[str, Any], scripts_dir: Path = SCRIPTS, triage: bool = False) -> str:
+# Harness calls a question may not make: everything that writes a record or a system. See question_rules.
+QUESTION_WITHHELD = (
+    "incident.py open",
+    "incident.py attach",
+    "incident.py set",
+    "incident.py close",
+    "incident.py promote",
+    "incident.py dismiss",
+    "timeline.py",
+    "autonomy.py run",
+)
+
+
+def question_rules(chat: dict[str, Any], scripts_dir: Path = SCRIPTS) -> dict[str, list[str]]:
+    """The rules for a question: the chat allow-list without any call that writes a record or a system.
+
+    Derived from rules(), so a question reads whatever a chat session reads,
+    site additions included. The withheld calls are denied outright; any other
+    call outside the allow-list reaches the gateway, which refuses every call a
+    question asks about.
+    """
+    normal = rules(chat, scripts_dir)
+    withheld = set(harness_rules_for(QUESTION_WITHHELD, scripts_dir))
+    allow = [rule for rule in normal["allow"] if rule not in withheld]
+    return {"allow": allow, "deny": normal["deny"] + sorted(withheld)}
+
+
+def harness_rules_for(calls: tuple[str, ...], scripts_dir: Path = SCRIPTS) -> list[str]:
+    """The allow-rule form of some harness calls, as harness_rules writes them."""
+    found = []
+    for call in calls:
+        script, _, rest = call.partition(" ")
+        prefix = f"uv run {scripts_dir / script}"
+        found.append(f"Bash({prefix} {rest} *)" if rest else f"Bash({prefix} *)")
+    return found
+
+
+def settings_json(
+    chat: dict[str, Any], scripts_dir: Path = SCRIPTS, triage: bool = False, question: bool = False
+) -> str:
     """Inline settings for the agent: the permission rules and nothing else."""
-    chosen = triage_rules(chat, scripts_dir) if triage else rules(chat, scripts_dir)
+    if question:
+        chosen = question_rules(chat, scripts_dir)
+    else:
+        chosen = triage_rules(chat, scripts_dir) if triage else rules(chat, scripts_dir)
     return json.dumps({"permissions": chosen}, sort_keys=True)

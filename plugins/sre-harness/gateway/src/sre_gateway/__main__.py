@@ -22,11 +22,14 @@ from sre_gateway.tracker import GhTracker
 log = logging.getLogger("sre_gateway")
 
 
-def agent_options(config: Config, resume: str | None, can_use_tool: Any, triage: str | None = None) -> Any:
+def agent_options(  # pylint: disable=too-many-arguments
+    config: Config, resume: str | None, can_use_tool: Any, triage: str | None = None, question: bool = False
+) -> Any:
     """How every agent session runs: the site as working directory, the plugin loaded, only the chat policy.
 
     A triage-only session gets the narrower triage rules and instructions; the
-    gateway starts it again with the chat ones once a responder speaks.
+    gateway starts it again with the chat ones once a responder speaks. A
+    question gets the question rules and instructions, for life.
     """
     from claude_agent_sdk import ClaudeAgentOptions  # noqa: PLC0415  pylint: disable=import-outside-toplevel
 
@@ -36,13 +39,13 @@ def agent_options(config: Config, resume: str | None, can_use_tool: Any, triage:
         "plugins": [{"type": "local", "path": str(harness.PLUGIN_ROOT)}],
         # No user, project or local settings: nothing on this machine can widen the policy.
         "setting_sources": [],
-        "settings": harness.chat_policy.settings_json(config.chat, triage=bool(triage)),
+        "settings": harness.chat_policy.settings_json(config.chat, triage=bool(triage), question=question),
         "permission_mode": "default",
         "can_use_tool": can_use_tool,
         "system_prompt": {
             "type": "preset",
             "preset": "claude_code",
-            "append": prompts.system_append(str(harness.SCRIPTS), triage=bool(triage)),
+            "append": prompts.system_append(str(harness.SCRIPTS), triage=bool(triage), question=question),
         },
         # A triage-only session carries its token: the harness scripts let it write only to the record it opened.
         "env": {
@@ -71,7 +74,7 @@ def pi_problems(config: Config) -> list[str]:
     return problems
 
 
-def pi_driver_factory(config: Config) -> Callable[[AskPermission, str | None], pi.PiDriver]:
+def pi_driver_factory(config: Config) -> Callable[..., pi.PiDriver]:
     """Set up the gateway-owned Pi home, and return a factory for Pi sessions under the chat policy."""
     nagios = None
     base = config.nagios_base_url()
@@ -89,17 +92,19 @@ def pi_driver_factory(config: Config) -> Callable[[AskPermission, str | None], p
         env={"SRE_HARNESS_SITE": str(config.site_root)},
     )
     policies = {
-        False: harness.tool_policy.Policy.from_rules(harness.chat_policy.rules(config.chat)),
-        True: harness.tool_policy.Policy.from_rules(harness.chat_policy.triage_rules(config.chat)),
+        "chat": harness.tool_policy.Policy.from_rules(harness.chat_policy.rules(config.chat)),
+        "triage": harness.tool_policy.Policy.from_rules(harness.chat_policy.triage_rules(config.chat)),
+        "question": harness.tool_policy.Policy.from_rules(harness.chat_policy.question_rules(config.chat)),
     }
 
-    def make(ask: AskPermission, triage: str | None) -> pi.PiDriver:
+    def make(ask: AskPermission, triage: str | None, question: bool = False) -> pi.PiDriver:
+        mode = "question" if question else "triage" if triage else "chat"
         return pi.PiDriver(
             setup,
-            policies[bool(triage)],
+            policies[mode],
             ask,
-            system_append=prompts.system_append(str(harness.SCRIPTS), triage=bool(triage)),
-            triage_token=triage,
+            system_append=prompts.system_append(str(harness.SCRIPTS), triage=bool(triage), question=question),
+            triage_token=None if question else triage,
         )
 
     return make
@@ -138,8 +143,8 @@ def build(config: Config) -> Gateway:
         extra["runner_password"] = config.runner_auth[1]
     secrets = harness.outbound_secrets(extra=extra, names=config.credential_names())
 
-    def sdk_factory(ask: AskPermission, triage: str | None) -> SdkDriver:
-        return SdkDriver(lambda resume, can_use: agent_options(config, resume, can_use, triage), ask)
+    def sdk_factory(ask: AskPermission, triage: str | None, question: bool = False) -> SdkDriver:
+        return SdkDriver(lambda resume, can_use: agent_options(config, resume, can_use, triage, question), ask)
 
     driver_factory = pi_driver_factory(config) if config.agent == "pi" else sdk_factory
 
@@ -151,6 +156,7 @@ def build(config: Config) -> Gateway:
         idle_seconds=config.idle_stop_seconds,
         max_sessions=config.max_sessions,
         state_dir=config.state_dir,
+        question_idle_seconds=config.question_idle_seconds,
     )
     return Gateway(
         settings,
@@ -161,6 +167,7 @@ def build(config: Config) -> Gateway:
         scrub=lambda text: harness.scrub(text, secrets),
         runner=build_runner(config),
         record_policy=harness.audit.record_policy_change,
+        env_values=secrets,
     )
 
 

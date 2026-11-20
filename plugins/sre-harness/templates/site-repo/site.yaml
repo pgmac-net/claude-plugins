@@ -122,6 +122,7 @@ incident:
 #   approval_ttl_seconds: 300
 #   idle_stop_minutes: 30
 #   max_sessions: 2
+#   question_idle_minutes: 5   # a /sre question ends after this long with no message
 #   allow: []   # e.g. mcp__<server>__<tool>, one read-only MCP tool per entry
 #   secrets_env:
 #     bot_token: SLACK_BOT_TOKEN

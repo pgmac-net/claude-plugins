@@ -90,6 +90,43 @@ def test_settings_json_is_permissions_only_and_merges_site_rules():
     assert "WebFetch" in settings["permissions"]["deny"]
 
 
+def test_question_rules_withhold_and_deny_every_writer():
+    rules = chat_policy.question_rules(chat(allow=["mcp__monitoring__get_alerts"]), Path("/p"))
+    for call in (
+        "incident.py open *",
+        "incident.py attach *",
+        "incident.py set *",
+        "incident.py close *",
+        "incident.py promote *",
+        "incident.py dismiss *",
+        "timeline.py *",
+        "autonomy.py run *",
+    ):
+        rule = f"Bash(uv run /p/{call})"
+        assert rule not in rules["allow"], rule
+        assert rule in rules["deny"], rule
+    assert not any("incident.py" in rule or "timeline.py" in rule for rule in rules["allow"] if "status" not in rule)
+
+
+def test_question_rules_keep_the_reads_and_the_deny_list():
+    rules = chat_policy.question_rules(chat(allow=["mcp__monitoring__get_alerts"]), Path("/p"))
+    for rule in (
+        "Bash(uv run /p/slo.py status *)",
+        "Bash(uv run /p/kube_read.py *)",
+        "Bash(uv run /p/incident.py status *)",
+        "Bash(gh issue view *)",
+        "mcp__monitoring__get_alerts",
+        "Read",
+    ):
+        assert rule in rules["allow"], rule
+    assert set(chat_policy.default_deny()) <= set(rules["deny"])
+
+
+def test_settings_json_picks_the_question_rules():
+    settings = json.loads(chat_policy.settings_json(chat(), Path("/p"), question=True))
+    assert settings["permissions"] == chat_policy.question_rules(chat(), Path("/p"))
+
+
 def test_rules_refuse_a_bad_site_rule():
     with pytest.raises(ValueError, match="chat/allow/0"):
         chat_policy.rules(chat(allow=["Bash"]))

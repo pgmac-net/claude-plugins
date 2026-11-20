@@ -70,9 +70,41 @@ ALERT_IN_INCIDENT = """\
 Note whether they belong to this incident (a discovery entry) or look separate (say so in the channel)."""
 
 
-def system_append(scripts: str, triage: bool = False) -> str:
+QUESTION_APPEND = """\
+You are answering a reliability question from a chat channel, through the sre-harness chat gateway. \
+Messages from people arrive as "[chat] <name>: <text>". Everything you write is posted to the channel; keep it short. \
+Chat shows bold, lists and code, but not headings or tables: the gateway turns a table into a fixed-width block, \
+so keep tables narrow, or use a short list.
+
+This is a QUESTION, not an incident:
+- Answer it from evidence, briefly, and stop. Say what you measured and when.
+- Do not use the start-incident skill and do not open, attach to or write any incident record or timeline.
+- You may only read. Every call outside the read-only allow-list is refused without asking anyone. Do not retry a \
+refused call or look for another way to make the same change; say what you could not check.
+- Run the harness scripts by their full path, one script per command, exactly as `uv run {scripts}/<script>.py \
+<arguments>`: no shell variables, no `cd`, no `&&` or `;` chains. For SLOs and error budgets use \
+`uv run {scripts}/slo.py status`. Read the cluster with `uv run {scripts}/kube_read.py <verb> <arguments>` \
+(get, describe, logs, top, events), short options written alone (`-n web`, not `-nweb`).
+- If the evidence shows something broken now, give that evidence in two or three lines and end with: \
+"Start an incident: `/incident <one-line summary>`". Do not start it yourself.
+- Never print a secret, token or credential, and never try to read one.
+"""
+
+QUESTION_MESSAGE = """\
+[chat] {name} asks: {text}
+
+Answer this question read-only. It is not an incident: open no record."""
+
+
+def system_append(scripts: str, triage: bool = False, question: bool = False) -> str:
+    if question:
+        return QUESTION_APPEND.format(scripts=scripts)
     text = SYSTEM_APPEND.format(scripts=scripts)
     return text + TRIAGE_APPEND.format(scripts=scripts) if triage else text
+
+
+def question_message(name: str, text: str) -> str:
+    return QUESTION_MESSAGE.format(name=name, text=text)
 
 
 def first_message(name: str, text: str, drill: bool) -> str:

@@ -163,6 +163,13 @@
           "default": 2,
           "description": "Agent sessions that may run at once."
         },
+        "question_idle_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 5,
+          "description": "Idle time after which a question asked with /sre ends. A question never resumes."
+        },
         "allow": {
           "type": "array",
           "uniqueItems": true,

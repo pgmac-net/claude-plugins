@@ -16,11 +16,15 @@ features:
       description: Start an incident (or "drill <text>" for a practice one)
       usage_hint: "[drill] what is broken"
       should_escape: false
+    - command: /sre
+      description: Ask a read-only reliability question; opens no incident
+      usage_hint: "where does the ingress SLO stand?"
+      should_escape: false
 oauth_config:
   scopes:
     bot:
       - chat:write          # post and edit messages and approval requests
-      - commands            # /incident
+      - commands            # /incident and /sre
       - groups:write        # create, invite to and archive private incident channels
       - groups:read
       - groups:history      # read messages in incident channels
