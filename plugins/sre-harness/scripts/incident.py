@@ -537,6 +537,9 @@ def cmd_dismiss(args: argparse.Namespace, doc: dict[str, Any]) -> int:
 
 
 def cmd_gc(args: argparse.Namespace, doc: dict[str, Any]) -> int:
+    if args.ignore_issue_state and sre_common.from_chat():
+        # The deny rule is text matching; this is the control. Closing the issue is a person's decision.
+        raise SiteError("--ignore-issue-state clears state before a person has closed the issue; not allowed from chat")
     policy = state_gc.Policy(
         require_issue_closed=not args.ignore_issue_state, fetch=not args.no_fetch, token_days=args.token_days
     )
@@ -550,7 +553,8 @@ def cmd_gc(args: argparse.Namespace, doc: dict[str, Any]) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:  # pylint: disable=too-many-statements  # one line per option
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # No abbreviated options: the chat policy matches option names as text (homelabia#273).
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--site", help="site repository path")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -599,7 +603,7 @@ def build_parser() -> argparse.ArgumentParser:  # pylint: disable=too-many-state
     setter.add_argument("--runbook")
     setter.set_defaults(run=cmd_set)
 
-    gc = sub.add_parser("gc", help="clear local state of incidents whose audit log has merged")
+    gc = sub.add_parser("gc", help="clear local state of incidents whose audit log has merged", allow_abbrev=False)
     gc.add_argument("--apply", action="store_true", help="delete; the default is a dry run")
     gc.add_argument("--no-fetch", action="store_true", help="do not fetch the audit repository first")
     gc.add_argument("--ignore-issue-state", action="store_true", help="do not require the tracking issue to be closed")

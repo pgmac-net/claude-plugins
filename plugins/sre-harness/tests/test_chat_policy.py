@@ -50,8 +50,8 @@ def test_close_out_is_allowed_without_the_options_that_weaken_it():
     rules = chat_policy.rules(chat(), Path("/p"))
     assert "Bash(uv run /p/audit.py commit *)" in rules["allow"]
     assert "Bash(uv run /p/incident.py gc *)" in rules["allow"]
-    assert "Bash(uv run /p/audit.py commit *--offline*)" in rules["deny"]
-    assert "Bash(uv run /p/incident.py gc *--ignore-issue-state*)" in rules["deny"]
+    assert "Bash(uv run /p/audit.py commit *--of*)" in rules["deny"]
+    assert "Bash(uv run /p/incident.py gc *--ig*)" in rules["deny"]
     for withheld in (chat_policy.triage_rules(chat(), Path("/p")), chat_policy.question_rules(chat(), Path("/p"))):
         assert "Bash(uv run /p/audit.py commit *)" in withheld["deny"]
         assert "Bash(uv run /p/incident.py gc *)" in withheld["deny"]

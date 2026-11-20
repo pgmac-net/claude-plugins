@@ -59,10 +59,13 @@ HARNESS_CALLS = (
 
 # Options of allow-listed harness calls that no chat session may use: skipping the
 # check against the timeline's pinned hashes, and clearing state before a person
-# has closed the tracking issue.
+# has closed the tracking issue. These rules are a first layer only: the scripts
+# take no abbreviated options and refuse both options themselves under the gateway
+# (SRE_HARNESS_NO_CURRENT). Each rule names the shortest prefix that still means
+# the option, so an abbreviation would also be caught if a parser allowed one.
 HARNESS_DENIED_OPTIONS = (
-    ("audit.py commit", "--offline"),
-    ("incident.py gc", "--ignore-issue-state"),
+    ("audit.py commit", "--of"),
+    ("incident.py gc", "--ig"),
 )
 
 # Read-only commands beyond Claude Code's built-in set. Only commands whose

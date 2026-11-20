@@ -259,6 +259,15 @@ def test_attach_refreshes_the_issue_fields_and_keeps_the_rest(gh):
     assert state["promoted_from"] == "auto-3"
 
 
+@pytest.mark.usefixtures("gh")
+def test_gc_refuses_ignore_issue_state_from_chat_and_takes_no_abbreviation(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        incident.main(["gc", "--ig"])
+    monkeypatch.setenv(sre_common.NO_CURRENT_ENV, "1")
+    assert incident.main(["gc", "--ignore-issue-state"]) == 2
+    assert "not allowed from chat" in capsys.readouterr().err
+
+
 class TestNoCurrentPointer:
     """Under the chat gateway every session shares one pointer, so scripts must be told the incident."""
 

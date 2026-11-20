@@ -514,6 +514,9 @@ def _commit_ready(state: dict[str, Any], doc: dict[str, Any], offline: bool) -> 
 
 def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, Any], site_root: Path) -> int:
     incident_id = state["id"]
+    if args.offline and sre_common.from_chat():
+        # The deny rule is text matching; this is the control.
+        raise SiteError("--offline skips the check against the timeline's pinned hashes and is not allowed from chat")
     # A promoted incident began as an unattended triage: its log is the first part of this one's, and goes with it.
     earlier = sre_common.read_incident_state(state["promoted_from"]) if state.get("promoted_from") else None
     if earlier is not None and not audit_hook.spool_path(earlier["id"]).is_file():
@@ -679,7 +682,8 @@ def _has_origin_head(checkout: Path) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # No abbreviated options: the chat policy matches option names as text (homelabia#273).
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--site", help="site repository path")
     parser.add_argument("--incident", help="<repo-alias>-<number>; default is the current incident")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -700,7 +704,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verifier.set_defaults(run=cmd_verify)
 
-    commit = sub.add_parser("commit", help="commit the log to the audit repository and stop capture")
+    commit = sub.add_parser(
+        "commit", help="commit the log to the audit repository and stop capture", allow_abbrev=False
+    )
     commit.add_argument("--no-pr", action="store_true", help="push the branch but do not open a pull request")
     commit.add_argument("--offline", action="store_true", help="skip the comparison with the timeline's pinned hashes")
     commit.add_argument(

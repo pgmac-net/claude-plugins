@@ -423,6 +423,15 @@ class TestAuditCli:
         assert again["status"] == "preserved" and "nothing to do" in again["note"]
 
     @pytest.mark.usefixtures("remote")
+    def test_offline_is_refused_from_chat_and_takes_no_abbreviation(self, monkeypatch, capsys):
+        with pytest.raises(SystemExit):
+            audit.main(["commit", "--no-pr", "--off"])
+        monkeypatch.setenv(sre_common.NO_CURRENT_ENV, "1")
+        assert audit.main(["commit", "--incident", "catalog-5", "--no-pr", "--offline"]) == 2
+        assert "not allowed from chat" in capsys.readouterr().err
+        assert not audit_hook.is_closed("catalog-5")
+
+    @pytest.mark.usefixtures("remote")
     def test_a_stale_local_branch_does_not_block_a_commit(self, incident, capsys):
         subprocess.run(["git", "-C", str(incident), "branch", "audit/catalog-5"], check=True, capture_output=True)
         assert self.committed(capsys)["status"] == "committed"

@@ -284,6 +284,11 @@ TRIAGE_ENV = "SRE_HARNESS_TRIAGE"
 NO_CURRENT_ENV = "SRE_HARNESS_NO_CURRENT"
 
 
+def from_chat() -> bool:
+    """Whether this process runs under the chat gateway, which sets NO_CURRENT_ENV for every agent."""
+    return bool(os.environ.get(NO_CURRENT_ENV))
+
+
 TRIAGE_TOKEN = re.compile(r"^[0-9a-f]{32}$")
 
 
