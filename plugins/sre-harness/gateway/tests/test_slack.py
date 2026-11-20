@@ -358,6 +358,12 @@ def test_no_reading_of_the_code_structure_lets_a_mention_through(text):
     assert "<@" not in block(text)
 
 
+def test_an_escaped_backslash_does_not_escape_the_backtick_after_it():
+    # CommonMark: '\\\\' is a backslash, then '`' opens a span; the span's content is code, not prose.
+    out = block("\\\\`<@U1>` and \\`<@U2>\\`")
+    assert "<@" not in out
+
+
 def test_tilde_and_longer_fences_hold_their_content_as_code():
     text = "~~~\n[a](x) <b>\n~~~\n````\n```\n<b> y\n````"
     assert block(text) == text

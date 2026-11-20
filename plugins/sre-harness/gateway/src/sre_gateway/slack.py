@@ -270,8 +270,8 @@ def _backtick_runs(line: str) -> list[tuple[int, int]]:
     runs: list[tuple[int, int]] = []
     index, size = 0, len(line)
     while index < size:
-        if line[index] == "\\" and line[index + 1 : index + 2] == "`":
-            index += 2
+        if line[index] == "\\" and line[index + 1 : index + 2] in ("`", "\\"):
+            index += 2  # an escaped backtick opens nothing; an escaped backslash escapes nothing after it
         elif line[index] == "`":
             end = index
             while end < size and line[end] == "`":
