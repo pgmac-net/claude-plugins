@@ -1,6 +1,6 @@
 [project]
 name = "sre-gateway"
-version = "0.13.0"
+version = "0.13.1"
 description = "Chat-ops gateway for the sre-harness plugin: drives an incident agent from chat, with identity-bound approvals"
 readme = "README.md"
 license = "MIT"
