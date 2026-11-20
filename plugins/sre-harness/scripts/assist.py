@@ -351,10 +351,10 @@ def suggest_entry_type(
     }
 
 
-def log_to_audit(result: dict[str, Any]) -> None:
-    """Record the advice in the current incident's audit log, if there is one being captured."""
+def log_to_audit(result: dict[str, Any], incident_id: str | None = None) -> None:
+    """Record the advice in the incident's audit log (the current one if none is named), if it is being captured."""
     try:
-        incident_id = sre_common.read_incident_state()["id"]
+        incident_id = sre_common.read_incident_state(incident_id)["id"]
     except SiteError:
         return
     if audit_hook.is_closed(incident_id) or not audit_hook.spool_path(incident_id).is_file():
@@ -366,6 +366,7 @@ def log_to_audit(result: dict[str, Any]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--site", help="site repository path")
+    parser.add_argument("--incident", help="<repo-alias>-<number> whose audit log records the advice")
     sub = parser.add_subparsers(dest="kind", required=True)
 
     severity = sub.add_parser("severity", help="suggest a severity level")
@@ -395,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
         result = {"available": True, "advisory": True, **args.run(site_root, doc, assist, masker, args)}
     except (Unavailable, SiteError) as exc:
         result = {"available": False, "advisory": True, "kind": args.kind, "reason": str(exc)}
-    log_to_audit(result)
+    log_to_audit(result, args.incident)
     print(json.dumps(result, indent=2))
     return 0
 

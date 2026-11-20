@@ -315,7 +315,7 @@ def cmd_attach(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     severity = re.search(r"^\*\*Severity:\*\* (P[1-4])", issue["body"] or "", re.MULTILINE)
     phase = re.search(r"^\*\*Phase:\*\* (.+)$", issue["body"] or "", re.MULTILINE)
     drill = doc["incident"].get("drill", {})
-    state = {
+    from_issue = {
         "id": args.incident,
         "repo": repo,
         "number": number,
@@ -324,13 +324,30 @@ def cmd_attach(args: argparse.Namespace, doc: dict[str, Any]) -> int:
         "drill": any(label["name"] == drill.get("label") for label in issue.get("labels", [])),
         "severity": severity.group(1) if severity else None,
         "phase": phase.group(1).strip() if phase else None,
-        "opened_at": iso_utc(sre_common.parse_utc(issue["createdAt"])),
-        "status": "open",
     }
+    path = sre_common.incident_state_path(args.incident)
+    known = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    # What the issue says is refreshed; what only local state knows (status, resolution, triage, promotion) is kept.
+    state = {**(known or {"opened_at": iso_utc(sre_common.parse_utc(issue["createdAt"])), "status": "open"})}
+    state.update(from_issue)
+    resolved = state.get("status") == "resolved"
+    if resolved and args.reopen:
+        sre_common.check_triage_write(state)
+        state["status"] = "open"
+        state.pop("resolved_at", None)
     start_capture(state, doc)
     token = state.pop("bind")
     sre_common.write_incident_state(state)
+    if resolved and args.reopen:
+        import timeline  # noqa: PLC0415  pylint: disable=import-outside-toplevel
+
+        timeline.post(state, "decision", "Reopened (incident.py attach --reopen).", doc["incident"]["timezone"], None)
     print(json.dumps({"id": state["id"], "url": state["url"], "bind": token}))
+    if resolved and not args.reopen:
+        print(
+            f"{state['id']} is resolved; attached for follow-up, still resolved. Pass --reopen to reopen it.",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -382,8 +399,38 @@ def cmd_close(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     state.update({"status": "resolved", "resolved_at": iso_utc(now)})
     sre_common.write_incident_state(state, make_current=False)
     print(f"{state['id']}: resolved. The tracking issue stays open until a person closes it.")
-    print("The audit hook is still capturing. When the review is written, run: audit.py commit")
+    print_close_out(state, doc, args.site_root)
     return 0
+
+
+def close_out_steps(state: dict[str, Any], doc: dict[str, Any], site_root: Path) -> list[str]:
+    """The close-out steps still to do for a resolved incident, worked out from the real state, in order."""
+    incident_id = state["id"]
+    steps = []
+    if audit_hook.spool_path(incident_id).is_file():
+        if not audit_hook.is_closed(incident_id):
+            steps.append(f"Commit the audit log: audit.py commit --incident {incident_id}")
+            steps.append("A person merges the audit log's pull request")
+        else:
+            # Committed: is it on the default branch yet? Fetch only now, when the answer can be yes.
+            why = state_gc.preserved(incident_id, doc, site_root, set(), state_gc.Policy())
+            if why:
+                steps.append(f"A person merges the audit log's pull request ({why})")
+    try:
+        issue = state_gc.issue_state(incident_id, doc)
+    except SiteError as exc:
+        steps.append(f"A person closes the tracking issue, if still open (could not check: {exc})")
+    else:
+        if issue != "CLOSED":
+            steps.append(f"A person closes the tracking issue: {state.get('url', incident_id)}")
+    steps.append("Clear local state: incident.py gc --apply")
+    return steps
+
+
+def print_close_out(state: dict[str, Any], doc: dict[str, Any], site_root: Path) -> None:
+    print(f"Close-out for {state['id']}, still to do:")
+    for number, step in enumerate(close_out_steps(state, doc, site_root), 1):
+        print(f"  {number}. {step}")
 
 
 def _auto_state(incident_id: str | None) -> dict[str, Any]:
@@ -484,7 +531,8 @@ def cmd_dismiss(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     now = utc_now()
     state.update({"status": "resolved", "resolved_at": iso_utc(now), "dismissed": True})
     sre_common.write_incident_state(state, make_current=False)
-    print(f"{state['id']}: dismissed and closed. Run audit.py commit to keep its log.")
+    print(f"{state['id']}: dismissed and closed.")
+    print_close_out(state, doc, args.site_root)
     return 0
 
 
@@ -501,7 +549,7 @@ def cmd_gc(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:  # pylint: disable=too-many-statements  # one line per option
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--site", help="site repository path")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -533,6 +581,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     attach = sub.add_parser("attach", help="adopt an existing tracking issue")
     attach.add_argument("incident", help="<repo-alias>-<number>")
+    attach.add_argument("--reopen", action="store_true", help="reopen it if it is resolved (recorded in the timeline)")
     attach.set_defaults(run=cmd_attach)
 
     status = sub.add_parser("status", help="show an incident's local state")

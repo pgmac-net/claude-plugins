@@ -51,6 +51,18 @@ HARNESS_CALLS = (
     "kube_read.py",
     "slo.py status",
     "slo.py check",
+    # Close-out (homelabia#273): the log goes to its own branch with a pull request a person merges, and gc
+    # deletes only local state it has proved is preserved. The options that weaken either are denied below.
+    "audit.py commit",
+    "incident.py gc",
+)
+
+# Options of allow-listed harness calls that no chat session may use: skipping the
+# check against the timeline's pinned hashes, and clearing state before a person
+# has closed the tracking issue.
+HARNESS_DENIED_OPTIONS = (
+    ("audit.py commit", "--offline"),
+    ("incident.py gc", "--ignore-issue-state"),
 )
 
 # Read-only commands beyond Claude Code's built-in set. Only commands whose
@@ -212,9 +224,12 @@ def default_allow(scripts_dir: Path = SCRIPTS) -> list[str]:
     return [*READ_ONLY_TOOLS, *harness_rules(scripts_dir), *(f"Bash({cmd} *)" for cmd in READ_ONLY_BASH)]
 
 
-def default_deny() -> list[str]:
+def default_deny(scripts_dir: Path = SCRIPTS) -> list[str]:
     """The plugin's deny-list. A Read rule also blocks edits of the same path; Edit is listed for clarity."""
     found = list(DENY_TOOLS)
+    for call, option in HARNESS_DENIED_OPTIONS:
+        script, _, rest = call.partition(" ")
+        found.append(f"Bash(uv run {scripts_dir / script} {rest} *{option}*)")
     for path in DENY_PATHS:
         found += [f"Read({path})", f"Edit({path})"]
     found += [f"Bash({cmd} *)" for cmd in DENY_BASH]
@@ -294,7 +309,7 @@ def rules(chat: dict[str, Any], scripts_dir: Path = SCRIPTS) -> dict[str, list[s
         raise ValueError("; ".join(problems))
     allow = default_allow(scripts_dir)
     allow += [rule for rule in chat.get("allow", []) if rule not in allow]
-    return {"allow": allow, "deny": default_deny()}
+    return {"allow": allow, "deny": default_deny(scripts_dir)}
 
 
 def triage_rules(chat: dict[str, Any], scripts_dir: Path = SCRIPTS) -> dict[str, list[str]]:
@@ -324,6 +339,8 @@ TRIAGE_WITHHELD = (
     "incident.py promote",
     "incident.py dismiss",
     "autonomy.py run",
+    "audit.py commit",
+    "incident.py gc",
 )
 
 
@@ -337,6 +354,8 @@ QUESTION_WITHHELD = (
     "incident.py dismiss",
     "timeline.py",
     "autonomy.py run",
+    "audit.py commit",
+    "incident.py gc",
 )
 
 

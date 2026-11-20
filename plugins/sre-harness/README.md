@@ -87,6 +87,8 @@ uv run scripts/audit.py verify --check-anchors
 uv run scripts/audit.py commit     # to the site's private audit location, on a branch, as a pull request
 ```
 
+`incident.py close` prints the close-out steps still to do. `audit.py commit` is safe to run again: it reports `preserved` or `pending`, and refuses a log that changed since it was pushed unless `--amend`. From chat, scripts need `--incident <id>` (`SRE_HARNESS_NO_CURRENT`), because every session shares one current-incident pointer.
+
 The log is spooled under `~/.local/state/sre-harness/` during the incident and committed at the end. A session is bound to an incident by a single-use token that `incident.py` issues. Every timeline entry pins the log's head hash and record count in its marker on the code host, so a later rewrite of the log shows up in `verify --check-anchors`. `commit` refuses a broken chain, a log that disagrees with its pinned hashes, or one with a secret left in it.
 
 What it is not: tamper-proof. The log and the files that switch capture on belong to the same user as the agent, so a process set on defeating them can. The checks make accidents and later edits visible. Off-host shipping of records is the control for a hostile process and is not built yet. Also: the hook fails open, and redaction is pattern-based.

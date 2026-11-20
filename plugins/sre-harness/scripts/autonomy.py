@@ -308,6 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
             one.add_argument("--precondition-evidence", help="what you observed that satisfies the precondition")
             one.add_argument("--timeout", type=int, default=120, help="seconds before the command is abandoned")
     sub.add_parser("list", help="show the allow-list").set_defaults(run=cmd_list)
+    sre_common.incident_after_subcommand(sub)
     return parser
 
 

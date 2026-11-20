@@ -262,6 +262,10 @@ _Avoid_: Status message (the `status` command is something else), progress bar
 The chat platform's own "is writing…" status for the gateway's bot, shown while the agent works and cleared just before each post and while an approval request waits. Best-effort: only where the platform has one, and in Slack only in a thread.
 _Avoid_: Typing event, presence
 
+**Close-out**:
+What follows resolving an incident, in order: commit the audit log, merge its pull request, close the tracking issue, then clear local state with `incident.py gc --apply`. `close` and `dismiss` print the steps still to do.
+_Avoid_: Cleanup, teardown, wrap-up
+
 **PIR**:
 A post-incident review: the written analysis of an incident's causes and the actions that follow.
 _Avoid_: Post-mortem, RCA document

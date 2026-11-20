@@ -11,7 +11,7 @@ import sre_common
 import timeline
 
 
-class FakeGh:  # pylint: disable=too-few-public-methods
+class FakeGh:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Stands in for the gh CLI: records calls and keeps one issue with comments."""
 
     def __init__(self):
@@ -22,6 +22,7 @@ class FakeGh:  # pylint: disable=too-few-public-methods
         self.labels: list[str] = []
         self.next_number = 41
         self.title = "Old one"
+        self.state = "OPEN"
 
     def __call__(self, args, stdin=None, timeout=None):  # pylint: disable=too-many-return-statements,unused-argument
         self.calls.append(args)
@@ -37,6 +38,8 @@ class FakeGh:  # pylint: disable=too-few-public-methods
             self.body = stdin
             self.title = args[args.index("--title") + 1]
             return f"https://example.com/example-org/x/issues/{self.next_number}\n"
+        if verb == "issue view" and "--jq" in args:
+            return self.state + "\n"
         if verb == "issue view":
             return json.dumps(
                 {
@@ -187,6 +190,95 @@ def test_attach_adopts_an_existing_issue(gh):
     assert incident.main(["attach", "incidents-9"]) == 0
     state = sre_common.read_incident_state()
     assert (state["id"], state["severity"], state["phase"]) == ("incidents-9", "P3", "Diagnosing")
+
+
+def close_out(capsys) -> list[str]:
+    out = capsys.readouterr().out
+    return [line.strip() for line in out.split("still to do:", 1)[1].splitlines() if line.strip()]
+
+
+@pytest.mark.usefixtures("gh")
+def test_close_lists_the_close_out_steps_from_the_real_state(capsys):
+    open_one()
+    spool = sre_common.state_dir() / "audit" / "incidents-41.jsonl"
+    spool.parent.mkdir(parents=True, exist_ok=True)
+    spool.write_text("{}\n", encoding="utf-8")
+    assert incident.main(["close"]) == 0
+    steps = close_out(capsys)
+    assert steps[0] == "1. Commit the audit log: audit.py commit --incident incidents-41"
+    assert steps[1].startswith("2. A person merges the audit log's pull request")
+    assert steps[2].startswith("3. A person closes the tracking issue: https://example.com/")
+    assert steps[3] == "4. Clear local state: incident.py gc --apply"
+    assert "still capturing" not in " ".join(steps)
+
+
+def test_close_out_skips_what_is_done(gh, capsys):
+    open_one()
+    spool = sre_common.state_dir() / "audit" / "incidents-41.jsonl"
+    spool.parent.mkdir(parents=True, exist_ok=True)
+    spool.write_text("{}\n", encoding="utf-8")
+    spool.with_suffix(".closed").write_text("committed\n", encoding="utf-8")
+    gh.state = "CLOSED"
+    assert incident.main(["close"]) == 0
+    steps = close_out(capsys)
+    assert not any("Commit the audit log" in step for step in steps)
+    assert steps[0].startswith("1. A person merges the audit log's pull request (")
+    assert not any("closes the tracking issue" in step for step in steps)
+    assert steps[-1] == "2. Clear local state: incident.py gc --apply"
+
+
+def test_attach_keeps_a_resolved_incident_resolved(gh, capsys):
+    open_one()
+    incident.main(["close"])
+    resolved_at = sre_common.read_incident_state("incidents-41")["resolved_at"]
+    capsys.readouterr()
+    assert incident.main(["attach", "incidents-41"]) == 0
+    state = sre_common.read_incident_state("incidents-41")
+    assert (state["status"], state["resolved_at"]) == ("resolved", resolved_at)
+    assert "Pass --reopen to reopen it" in capsys.readouterr().err
+    assert not gh.comments
+
+
+def test_attach_reopen_reopens_and_says_so_in_the_timeline(gh):
+    open_one()
+    incident.main(["close"])
+    assert incident.main(["attach", "incidents-41", "--reopen"]) == 0
+    state = sre_common.read_incident_state("incidents-41")
+    assert state["status"] == "open" and "resolved_at" not in state
+    assert "Reopened" in gh.comments[-1]["body"]
+
+
+def test_attach_refreshes_the_issue_fields_and_keeps_the_rest(gh):
+    open_one()
+    path = sre_common.incident_state_path("incidents-41")
+    path.write_text(json.dumps({**json.loads(path.read_text()), "promoted_from": "auto-3"}), encoding="utf-8")
+    gh.title = "Shop is down, payments too"
+    assert incident.main(["attach", "incidents-41"]) == 0
+    state = sre_common.read_incident_state("incidents-41")
+    assert state["title"] == "Shop is down, payments too"
+    assert state["promoted_from"] == "auto-3"
+
+
+class TestNoCurrentPointer:
+    """Under the chat gateway every session shares one pointer, so scripts must be told the incident."""
+
+    @pytest.fixture(autouse=True)
+    def chat_session(self, gh, monkeypatch):
+        open_one()
+        monkeypatch.setenv(sre_common.NO_CURRENT_ENV, "1")
+        return gh
+
+    def test_a_call_without_incident_is_refused(self, capsys):
+        assert incident.main(["status"]) == 2
+        assert "pass --incident <id>" in capsys.readouterr().err
+        assert timeline.main(["add", "--type", "update", "--text", "x"]) == 2
+
+    def test_naming_the_incident_after_the_subcommand_works(self, capsys):
+        assert incident.main(["status", "--incident", "incidents-41"]) == 0
+        capsys.readouterr()
+        assert timeline.main(["add", "--incident", "incidents-41", "--type", "update", "--text", "x"]) == 0
+        assert capsys.readouterr().out.startswith("incidents-41: ")
+        assert timeline.main(["--incident", "incidents-41", "add", "--type", "update", "--text", "y"]) == 0
 
 
 @pytest.mark.usefixtures("gh")

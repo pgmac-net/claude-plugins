@@ -169,3 +169,24 @@ async def test_description_is_kept_apart_from_what_runs():
     assert view.description == "only reads things"
     await b.on_click(Click(view.request_id, APPROVER, "deny"))
     await task
+
+
+async def test_a_closed_audit_log_is_refused_before_any_card():
+    chat, records = FakeChat(), []
+    b = ApprovalBroker(
+        chat,
+        approvers=frozenset({APPROVER}),
+        ttl_seconds=60,
+        record=records.append,
+        scrub=lambda t: t,
+        closed=lambda incident: incident == "catalog-57",
+    )
+    answer = await ask(b, incident="catalog-57")
+    assert not answer.allow
+    assert "audit log of catalog-57 is committed and closed" in answer.message
+    assert chat.approvals == [] and records == []
+    # Another incident's log is still open: its request is posted as usual.
+    task, view = await pending_request(chat, b, incident="incidents-7")
+    assert len(chat.approvals) == 1
+    await b.on_click(Click(view.request_id, APPROVER, "deny"))
+    await task

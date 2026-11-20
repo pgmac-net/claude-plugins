@@ -50,6 +50,8 @@ def agent_options(  # pylint: disable=too-many-arguments
         # A triage-only session carries its token: the harness scripts let it write only to the record it opened.
         "env": {
             "SRE_HARNESS_SITE": str(config.site_root),
+            # One current-incident pointer serves every session: chat sessions must name their incident.
+            harness.sre_common.NO_CURRENT_ENV: "1",
             **({harness.sre_common.TRIAGE_ENV: triage} if triage else {}),
         },
         "resume": resume,
@@ -89,7 +91,7 @@ def pi_driver_factory(config: Config) -> Callable[..., pi.PiDriver]:
         home=config.pi_home,
         session_dir=config.state_dir / "pi-sessions",
         cwd=config.site_root,
-        env={"SRE_HARNESS_SITE": str(config.site_root)},
+        env={"SRE_HARNESS_SITE": str(config.site_root), harness.sre_common.NO_CURRENT_ENV: "1"},
     )
     policies = {
         "chat": harness.tool_policy.Policy.from_rules(harness.chat_policy.rules(config.chat)),
@@ -168,6 +170,7 @@ def build(config: Config) -> Gateway:
         runner=build_runner(config),
         record_policy=harness.audit.record_policy_change,
         env_values=secrets,
+        audit_closed=harness.audit_hook.is_closed,
     )
 
 

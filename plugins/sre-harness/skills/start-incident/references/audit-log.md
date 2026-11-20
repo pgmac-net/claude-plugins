@@ -55,10 +55,22 @@ uv run <plugin root>/scripts/audit.py verify --check-anchors
 The hook keeps capturing after `incident.py close`, so that the review work is on record too. When the review's pull request is open:
 
 ```bash
-uv run <plugin root>/scripts/audit.py commit
+uv run <plugin root>/scripts/audit.py commit --incident <incident id>
 ```
 
+`incident.py close` and `dismiss` print the **close-out** steps still to do, worked out from the real state: commit the log, a person merges its pull request, a person closes the tracking issue, then `incident.py gc --apply`. Follow that list.
+
 It verifies the chain, compares the log with the hashes pinned in the timeline, scans it once more for anything secret-shaped, copies the log to the site's private audit location on a branch `audit/<incident id>`, pushes, opens a pull request, and stops capture. It uses a temporary worktree and leaves the checkout as it found it. It refuses to commit a broken chain, a log that does not match its pinned hashes, or a log with a leftover secret. Report any of those to the person; do not work around them, and do not edit the log to make the check pass.
+
+Running it again is safe. If the same log is already on the default branch it says `preserved`; if it is on the audit branch waiting for its pull request it says `pending`; either way it exits 0 and makes sure capture has stopped. If the log has changed since it was pushed, it refuses rather than overwrite an audit record; `--amend` pushes the new log to the same branch as a new commit, and is for a person to decide.
+
+From the chat gateway, `audit.py commit` and `incident.py gc` run without an approval request, but `commit --offline` and `gc --ignore-issue-state` are refused. Once the log is committed, the gateway refuses any further approval request for that incident at once, because none could be recorded.
+
+## Naming the incident
+
+Scripts called without `--incident` act on the machine's *current* incident, the one last opened or attached. Under the chat gateway every session shares that pointer, so the gateway sets `SRE_HARNESS_NO_CURRENT=1` and a call without `--incident` is refused. Pass it after the subcommand, e.g. `timeline.py add --incident <id> ...`, so the call still matches the allow-list. Writes print the incident they touched.
+
+`incident.py attach` to an incident that is already known keeps its local state and only refreshes what the issue says. A resolved incident stays resolved; `attach --reopen` reopens it and records that as a timeline decision.
 
 ## Afterwards: local state
 

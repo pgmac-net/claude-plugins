@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -245,6 +246,9 @@ def incident_state_path(incident_id: str) -> Path:
 def read_incident_state(incident_id: str | None = None) -> dict[str, Any]:
     """Load local state for an incident, or for the current one when no id is given."""
     if incident_id is None:
+        if os.environ.get(NO_CURRENT_ENV):
+            # Every chat session shares one pointer; another session's open can move it between turns.
+            raise SiteError("this session is driven from chat; pass --incident <id>")
         pointer = state_dir() / "current"
         if not pointer.is_file():
             raise SiteError("no current incident; open one with incident.py open, or pass --incident")
@@ -264,7 +268,20 @@ def write_incident_state(state: dict[str, Any], make_current: bool = True) -> No
         (state_dir() / "current").write_text(state["id"] + "\n", encoding="utf-8")
 
 
+def incident_after_subcommand(subparsers: Any) -> None:
+    """Accept --incident after each subcommand as well as before it.
+
+    The chat policy allows calls by prefix ('audit.py commit *'), so a chat
+    session must be able to name its incident after the subcommand. The value
+    is only set when given there, so one given before the subcommand stands.
+    """
+    for one in subparsers.choices.values():
+        one.add_argument("--incident", default=argparse.SUPPRESS, help="<repo-alias>-<number>")
+
+
 TRIAGE_ENV = "SRE_HARNESS_TRIAGE"
+# Set by the chat gateway: scripts must be told which incident to touch, never use the current pointer.
+NO_CURRENT_ENV = "SRE_HARNESS_NO_CURRENT"
 
 
 TRIAGE_TOKEN = re.compile(r"^[0-9a-f]{32}$")
