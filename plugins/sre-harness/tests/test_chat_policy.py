@@ -43,7 +43,19 @@ def test_plain_kubectl_is_not_allow_listed():
 
 def test_the_agent_cannot_record_its_own_approval():
     allow = chat_policy.default_allow(Path("/p"))
-    assert not any("audit.py record" in rule or "audit.py commit" in rule for rule in allow)
+    assert not any("audit.py record" in rule for rule in allow)
+
+
+def test_close_out_is_allowed_without_the_options_that_weaken_it():
+    rules = chat_policy.rules(chat(), Path("/p"))
+    assert "Bash(uv run /p/audit.py commit *)" in rules["allow"]
+    assert "Bash(uv run /p/incident.py gc *)" in rules["allow"]
+    assert "Bash(uv run /p/audit.py commit *--of*)" in rules["deny"]
+    assert "Bash(uv run /p/incident.py gc *--ig*)" in rules["deny"]
+    for withheld in (chat_policy.triage_rules(chat(), Path("/p")), chat_policy.question_rules(chat(), Path("/p"))):
+        assert "Bash(uv run /p/audit.py commit *)" in withheld["deny"]
+        assert "Bash(uv run /p/incident.py gc *)" in withheld["deny"]
+        assert "Bash(uv run /p/audit.py commit *)" not in withheld["allow"]
 
 
 def test_no_mutation_and_no_remote_shell_in_the_default_allow_list():
@@ -119,7 +131,7 @@ def test_question_rules_keep_the_reads_and_the_deny_list():
         "Read",
     ):
         assert rule in rules["allow"], rule
-    assert set(chat_policy.default_deny()) <= set(rules["deny"])
+    assert set(chat_policy.default_deny(Path("/p"))) <= set(rules["deny"])
 
 
 def test_settings_json_picks_the_question_rules():

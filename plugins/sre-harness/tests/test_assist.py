@@ -391,3 +391,18 @@ class TestAuditTrail:
     def test_nothing_is_recorded_outside_an_incident(self, capsys):
         run(capsys, "severity", "--impact", "Shop is down")
         assert not (audit_hook.state_dir() / "audit").exists()
+
+
+def test_advice_goes_to_the_named_incident_even_without_a_current_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    sre_common.write_incident_state({"id": "incidents-7", "status": "open"}, make_current=False)
+    spool = audit_hook.spool_path("incidents-7")
+    spool.parent.mkdir(parents=True, exist_ok=True)
+    spool.touch()
+    monkeypatch.setenv(sre_common.NO_CURRENT_ENV, "1")
+    result = {"kind": "severity", "suggestion": "P2", "available": True}
+    assist.log_to_audit(result)
+    assert spool.read_text(encoding="utf-8") == ""
+    assist.log_to_audit(result, "incidents-7")
+    record = json.loads(spool.read_text(encoding="utf-8"))
+    assert (record["event"], record["suggestion"]) == ("assist", "P2")

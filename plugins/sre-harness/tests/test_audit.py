@@ -372,6 +372,70 @@ class TestAuditCli:
         assert status.stdout == ""
         assert audit.main(["record", "--kind", "note", "--text", "late"]) == 2
 
+    @pytest.fixture
+    def remote(self, incident, tmp_path):
+        """The site checkout pushed to a bare remote, as audit.py commit expects."""
+        if shutil.which("git") is None:
+            pytest.skip("git is not installed")
+        bare = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "--bare", "-b", "main", str(bare)], check=True, capture_output=True)
+        script = (
+            f"git init -q -b main && git config user.email t@example.com && git config user.name T && "
+            f"git add -A && git commit -qm init && git remote add origin {bare} && git push -q -u origin main"
+        )
+        subprocess.run(["sh", "-c", script], cwd=incident, check=True, capture_output=True)  # noqa: S603,S607
+        return bare
+
+    @staticmethod
+    def committed(capsys) -> dict:
+        assert audit.main(["commit", "--no-pr", "--offline"]) == 0
+        return json.loads(capsys.readouterr().out)
+
+    @staticmethod
+    def on(bare: Path, ref: str) -> str:
+        shown = subprocess.run(
+            ["git", "-C", str(bare), "show", f"{ref}:audit/catalog-5.jsonl"], check=True, capture_output=True, text=True
+        )
+        return shown.stdout
+
+    @pytest.mark.usefixtures("remote")
+    def test_a_second_commit_reports_the_pending_pull_request(self, capsys):
+        assert self.committed(capsys)["status"] == "committed"
+        again = self.committed(capsys)
+        assert again["status"] == "pending" and "waiting for its pull request" in again["note"]
+
+    def test_a_changed_log_is_refused_unless_amended(self, remote, capsys):
+        self.committed(capsys)
+        audit_hook.append("catalog-5", {"v": 1, "incident": "catalog-5", "capture": "hook", "event": "late"})
+        assert audit.main(["commit", "--no-pr", "--offline"]) == 2
+        assert "changed since it was committed" in capsys.readouterr().err
+        assert audit.main(["commit", "--no-pr", "--offline", "--amend"]) == 0
+        assert json.loads(capsys.readouterr().out)["status"] == "amended"
+        assert self.on(remote, "audit/catalog-5") == audit_hook.spool_path("catalog-5").read_text(encoding="utf-8")
+
+    def test_a_merged_log_is_reported_preserved(self, remote, incident, capsys):
+        self.committed(capsys)
+        subprocess.run(
+            ["git", "-C", str(remote), "update-ref", "refs/heads/main", "refs/heads/audit/catalog-5"], check=True
+        )
+        subprocess.run(["git", "-C", str(incident), "fetch", "--quiet", "origin"], check=True)
+        again = self.committed(capsys)
+        assert again["status"] == "preserved" and "nothing to do" in again["note"]
+
+    @pytest.mark.usefixtures("remote")
+    def test_offline_is_refused_from_chat_and_takes_no_abbreviation(self, monkeypatch, capsys):
+        with pytest.raises(SystemExit):
+            audit.main(["commit", "--no-pr", "--off"])
+        monkeypatch.setenv(sre_common.NO_CURRENT_ENV, "1")
+        assert audit.main(["commit", "--incident", "catalog-5", "--no-pr", "--offline"]) == 2
+        assert "not allowed from chat" in capsys.readouterr().err
+        assert not audit_hook.is_closed("catalog-5")
+
+    @pytest.mark.usefixtures("remote")
+    def test_a_stale_local_branch_does_not_block_a_commit(self, incident, capsys):
+        subprocess.run(["git", "-C", str(incident), "branch", "audit/catalog-5"], check=True, capture_output=True)
+        assert self.committed(capsys)["status"] == "committed"
+
     @pytest.mark.usefixtures("incident")
     def test_commit_refuses_a_broken_chain(self, capsys):
         path = audit_hook.spool_path("catalog-5")

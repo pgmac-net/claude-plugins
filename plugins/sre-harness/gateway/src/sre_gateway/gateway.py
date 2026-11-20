@@ -155,6 +155,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         runner: Runner | None = None,
         record_policy: PolicyRecorder | None = None,
         env_values: dict[str, str] | None = None,
+        audit_closed: Callable[[str], bool] | None = None,
     ):
         self.settings = settings
         # Every post goes through the indicators, so the working line stays last and typing clears first.
@@ -168,7 +169,12 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         self._poller: asyncio.Task | None = None
         self._source_failing = False
         self.broker = ApprovalBroker(
-            self.chat, approvers=settings.approvers, ttl_seconds=settings.approval_ttl, record=record, scrub=scrub
+            self.chat,
+            approvers=settings.approvers,
+            ttl_seconds=settings.approval_ttl,
+            record=record,
+            scrub=scrub,
+            closed=audit_closed or (lambda _incident: False),
         )
         self.store = Store(settings.state_dir / "conversations.json")
         self.sessions: dict[str, Session] = {}

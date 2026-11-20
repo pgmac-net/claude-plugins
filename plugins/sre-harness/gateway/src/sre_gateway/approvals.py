@@ -21,6 +21,10 @@ from sre_gateway.chat import ApprovalView, ChatAdapter, Click, Place, Posted
 log = logging.getLogger(__name__)
 
 SUMMARY_LIMIT = 1500
+CLOSED_REFUSAL = (
+    "Refused: the audit log of {incident} is committed and closed, so no approval can be recorded. "
+    "Do not retry; a person can run it from a terminal, or start a new incident with /incident."
+)
 
 
 @dataclass(frozen=True)
@@ -65,7 +69,7 @@ def describe(tool: str, tool_input: dict[str, Any]) -> tuple[str, str | None]:
 
 
 class ApprovalBroker:
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(  # noqa: PLR0913  pylint: disable=too-many-arguments
         self,
         chat: ChatAdapter,
         *,
@@ -73,7 +77,9 @@ class ApprovalBroker:
         ttl_seconds: int,
         record: Recorder,
         scrub: Callable[[str], str],
+        closed: Callable[[str], bool] = lambda _incident: False,
     ):
+        self._closed = closed
         self._chat = chat
         self._approvers = approvers
         self._ttl = ttl_seconds
@@ -102,6 +108,9 @@ class ApprovalBroker:
                 "Refused: open or attach the incident record first (incident.py open). "
                 "Approvals are recorded in its audit log, so none can be given before it exists.",
             )
+        if self._closed(incident):
+            # Nothing can be written to a committed log, so no approval can count: say so before anyone clicks.
+            return PermissionAnswer(False, CLOSED_REFUSAL.format(incident=incident))
         command, description = describe(tool, tool_input)
         summary = self._scrub(command)
         if len(summary) > SUMMARY_LIMIT:

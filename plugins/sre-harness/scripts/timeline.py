@@ -178,7 +178,7 @@ def export(state: dict[str, Any], entries: list[dict[str, Any]], timezone: str) 
 
 def cmd_add(args, state, doc) -> int:
     text = args.text if args.text is not None else sys.stdin.read()
-    print(post(state, args.type, text, doc["incident"]["timezone"], args.at))
+    print(f"{state['id']}: {post(state, args.type, text, doc['incident']['timezone'], args.at)}")
     return 0
 
 
@@ -186,7 +186,7 @@ def cmd_handover(args, state, doc) -> int:
     text = "Passing the incident on.\n" + "\n".join(
         f"- **{label}:** {getattr(args, key)}" for key, label in HANDOVER_FIELDS
     )
-    print(post(state, "handover", text, doc["incident"]["timezone"], args.at))
+    print(f"{state['id']}: {post(state, 'handover', text, doc['incident']['timezone'], args.at)}")
     return 0
 
 
@@ -236,6 +236,7 @@ def build_parser() -> argparse.ArgumentParser:
     exporter = sub.add_parser("export", help="render the timeline as markdown")
     exporter.add_argument("--out", help="write to this file instead of stdout")
     exporter.set_defaults(run=cmd_export)
+    sre_common.incident_after_subcommand(sub)
     return parser
 
 

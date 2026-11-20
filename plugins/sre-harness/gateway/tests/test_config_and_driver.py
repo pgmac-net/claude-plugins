@@ -109,7 +109,8 @@ def test_agent_options_load_only_the_chat_policy(site):
     assert "WebFetch" in permissions["deny"]
     assert any("kube_read.py" in rule for rule in permissions["allow"])
     assert "kube_read.py" in options.system_prompt["append"]
-    assert options.env == {"SRE_HARNESS_SITE": str(config.site_root)}
+    assert options.env == {"SRE_HARNESS_SITE": str(config.site_root), "SRE_HARNESS_NO_CURRENT": "1"}
+    assert "--incident <id>" in options.system_prompt["append"]
     assert BOT not in json.dumps(options.env)
 
 

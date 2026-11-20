@@ -514,6 +514,9 @@ def _commit_ready(state: dict[str, Any], doc: dict[str, Any], offline: bool) -> 
 
 def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, Any], site_root: Path) -> int:
     incident_id = state["id"]
+    if args.offline and sre_common.from_chat():
+        # The deny rule is text matching; this is the control.
+        raise SiteError("--offline skips the check against the timeline's pinned hashes and is not allowed from chat")
     # A promoted incident began as an unattended triage: its log is the first part of this one's, and goes with it.
     earlier = sre_common.read_incident_state(state["promoted_from"]) if state.get("promoted_from") else None
     if earlier is not None and not audit_hook.spool_path(earlier["id"]).is_file():
@@ -529,26 +532,25 @@ def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, A
     branch = f"audit/{incident_id}"
     _git(checkout, "fetch", "--quiet", "origin")
     target = Path(doc["audit"]["path"]) / f"{incident_id}.jsonl"
-    with tempfile.TemporaryDirectory(prefix="sre-harness-audit-") as scratch:
-        tree = Path(scratch) / "tree"
-        _git(checkout, "worktree", "add", "--quiet", "-b", branch, str(tree), remote_head)
-        try:
-            (tree / target).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(audit_hook.spool_path(incident_id), tree / target)
-            _git(tree, "add", str(target))
-            message = f"audit: {incident_id} ({result['records']} records)\n\nhead: {result['head']}"
-            if earlier is not None:
-                before = target.parent / f"{earlier['id']}.jsonl"
-                shutil.copyfile(audit_hook.spool_path(earlier["id"]), tree / before)
-                _git(tree, "add", str(before))
-                message += f"\npromoted from: {earlier['id']} (committed beside it)"
-            _git(tree, "commit", "--quiet", "-m", message)
-            _git(tree, "push", "--quiet", "-u", "origin", branch)
-        finally:
-            _git(checkout, "worktree", "remove", "--force", str(tree))
+    spool = audit_hook.spool_path(incident_id).read_bytes()
+    found = _already_committed(args.amend, checkout, (remote_head, branch, target), spool, (state, earlier))
+    if found is not None:
+        if found["status"] == "pending" and not args.no_pr:
+            found["pull_request"] = _pull_request_or_blank(doc, branch)
+        print(json.dumps({"incident": incident_id, "branch": branch, "file": str(target), **found}))
+        return 0
+    if _has_local_branch(checkout, branch):
+        # Every earlier run leaves its local branch behind; the remote branch, if any, is the record.
+        _git(checkout, "branch", "-D", branch)
+    amend = args.amend and _git_show(checkout, f"origin/{branch}", target) is not None
+    base = f"origin/{branch}" if amend else remote_head
+    _push_log(checkout, (base, branch, target), (state, earlier), result, amend)
 
     url = ""
-    if not args.no_pr:
+    if amend:
+        # The pull request already exists and the push has happened: its link is only a courtesy.
+        url = "" if args.no_pr else _pull_request_or_blank(doc, branch)
+    elif not args.no_pr:
         url = sre_common.run_gh(
             [
                 "pr", "create", "--repo", doc["repos"][doc["audit"]["repo"]]["repo"], "--head", branch,
@@ -562,8 +564,113 @@ def cmd_commit(args: argparse.Namespace, state: dict[str, Any], doc: dict[str, A
     if earlier is not None:
         release_capture(earlier["id"])
     release_capture(incident_id)
-    print(json.dumps({"incident": incident_id, "branch": branch, "file": str(target), "pull_request": url}))
+    status = "amended" if amend else "committed"
+    print(
+        json.dumps(
+            {"incident": incident_id, "branch": branch, "file": str(target), "pull_request": url, "status": status}
+        )
+    )
     return 0
+
+
+def _push_log(
+    checkout: Path,
+    where: tuple[str, str, Path],
+    states: tuple[dict[str, Any], dict[str, Any] | None],
+    result: dict[str, Any],
+    amend: bool,
+) -> None:
+    """Commit the spool (and a promoted triage's beside it) on the audit branch, from base, and push it."""
+    base, branch, target = where
+    state, earlier = states
+    with tempfile.TemporaryDirectory(prefix="sre-harness-audit-") as scratch:
+        tree = Path(scratch) / "tree"
+        _git(checkout, "worktree", "add", "--quiet", "-B" if amend else "-b", branch, str(tree), base)
+        try:
+            (tree / target).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(audit_hook.spool_path(state["id"]), tree / target)
+            _git(tree, "add", str(target))
+            message = f"audit: {state['id']} ({result['records']} records{', amended' if amend else ''})"
+            message += f"\n\nhead: {result['head']}"
+            if earlier is not None:
+                before = target.parent / f"{earlier['id']}.jsonl"
+                shutil.copyfile(audit_hook.spool_path(earlier["id"]), tree / before)
+                _git(tree, "add", str(before))
+                message += f"\npromoted from: {earlier['id']} (committed beside it)"
+            _git(tree, "commit", "--quiet", "-m", message)
+            _git(tree, "push", "--quiet", "-u", "origin", branch)
+        finally:
+            _git(checkout, "worktree", "remove", "--force", str(tree))
+
+
+def _already_committed(
+    amend: bool,
+    checkout: Path,
+    where: tuple[str, str, Path],
+    spool: bytes,
+    states: tuple[dict[str, Any], dict[str, Any] | None],
+) -> dict[str, Any] | None:
+    """What an earlier commit already did, when there is nothing to do now; None to commit.
+
+    The same log on the default branch is preserved; the same log on the audit branch waits for its pull
+    request. A different log on the audit branch is refused unless --amend: an audit record is never
+    silently replaced.
+    """
+    remote_head, branch, target = where
+    state, earlier = states
+    if _git_show(checkout, remote_head, target) == spool:
+        _release_all(state, earlier)
+        return {"status": "preserved", "pull_request": "", "note": f"already on {remote_head}; nothing to do"}
+    pushed = _git_show(checkout, f"origin/{branch}", target)
+    if pushed is None:
+        return None
+    if pushed == spool:
+        _release_all(state, earlier)
+        return {"status": "pending", "pull_request": "", "note": "already committed; waiting for its pull request"}
+    if amend:
+        return None
+    added = len(spool.splitlines()) - len(pushed.splitlines())
+    raise SiteError(
+        f"{state['id']}: the log changed since it was committed to origin/{branch} ({added:+d} records); "
+        "not overwriting an audit record. Rerun with --amend to push the new log to the same branch"
+    )
+
+
+def _release_all(state: dict[str, Any], earlier: dict[str, Any] | None) -> None:
+    if earlier is not None:
+        release_capture(earlier["id"])
+    release_capture(state["id"])
+
+
+def _pull_request_or_blank(doc: dict[str, Any], branch: str) -> str:
+    try:
+        return _pull_request(doc, branch)
+    except SiteError:
+        return ""
+
+
+def _pull_request(doc: dict[str, Any], branch: str) -> str:
+    """The URL of the open pull request for a branch, or blank."""
+    repo = doc["repos"][doc["audit"]["repo"]]["repo"]
+    out = sre_common.run_gh(["pr", "list", "--repo", repo, "--head", branch, "--json", "url", "--jq", ".[0].url"])
+    return out.strip()
+
+
+def _git_show(cwd: Path, ref: str, path: Path) -> bytes | None:
+    """A file's bytes at a ref, or None when the ref or file is not there."""
+    git = shutil.which("git")
+    if not git:
+        raise SiteError("git is not installed")
+    done = subprocess.run([git, "-C", str(cwd), "show", f"{ref}:{path}"], capture_output=True, check=False)  # noqa: S603
+    return done.stdout if done.returncode == 0 else None
+
+
+def _has_local_branch(checkout: Path, branch: str) -> bool:
+    try:
+        _git(checkout, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+    except SiteError:
+        return False
+    return True
 
 
 def _has_origin_head(checkout: Path) -> bool:
@@ -575,7 +682,8 @@ def _has_origin_head(checkout: Path) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # No abbreviated options: the chat policy matches option names as text (homelabia#273).
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--site", help="site repository path")
     parser.add_argument("--incident", help="<repo-alias>-<number>; default is the current incident")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -596,10 +704,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verifier.set_defaults(run=cmd_verify)
 
-    commit = sub.add_parser("commit", help="commit the log to the audit repository and stop capture")
+    commit = sub.add_parser(
+        "commit", help="commit the log to the audit repository and stop capture", allow_abbrev=False
+    )
     commit.add_argument("--no-pr", action="store_true", help="push the branch but do not open a pull request")
     commit.add_argument("--offline", action="store_true", help="skip the comparison with the timeline's pinned hashes")
+    commit.add_argument(
+        "--amend", action="store_true", help="the log changed since it was committed: push it to the same branch"
+    )
     commit.set_defaults(run=cmd_commit)
+    sre_common.incident_after_subcommand(sub)
     return parser
 
 

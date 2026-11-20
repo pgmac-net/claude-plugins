@@ -24,6 +24,7 @@ sys.path.insert(0, str(SCRIPTS))
 # pylint: disable=wrong-import-position,import-error
 import alerts  # noqa: E402
 import audit  # noqa: E402
+import audit_hook  # noqa: E402
 import chat_policy  # noqa: E402
 import redact  # noqa: E402
 import sre_common  # noqa: E402
@@ -35,6 +36,7 @@ __all__ = [
     "SCRIPTS",
     "alerts",
     "audit",
+    "audit_hook",
     "chat_policy",
     "redact",
     "sre_common",
