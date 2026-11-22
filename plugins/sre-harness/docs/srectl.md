@@ -17,7 +17,9 @@ It needs `python3` (3.11 or later) and [`uv`](https://docs.astral.sh/uv/), the s
 
 ## Completion
 
-Every shell calls `srectl __complete`, which reads `scripts/srectl_spec.json`. It needs no `uv`, so a TAB is fast.
+Every shell calls `srectl __complete`, which reads `scripts/srectl_spec.json` (commands, flags, choices) and, for names, the site. It needs no `uv`, so a TAB is fast.
+
+If you saved a completion script to a file rather than using `eval`, regenerate it after an upgrade that changes it. 0.24.1 changed the bash one (it now reads the whole line, so `component:` and `--flag=value` complete correctly).
 
 | Shell | Setup |
 |---|---|
@@ -34,8 +36,18 @@ What completes:
 - a flag's fixed choices (`audit record --kind <TAB>`)
 - `--incident`: the incidents with local state in `$XDG_STATE_HOME/sre-harness/incidents` (default `~/.local/state`)
 - `--site` and `--out`: file names
+- `--service`, `--services` and `--slo`: names read from the site (below)
 
-Service and SLO names are not completed yet.
+### Service and SLO names
+
+Names come from the site, read on every TAB: the catalog's `Component` entities for services, and the `*.slo.yaml` files for SLOs. Nothing is cached, so a new service completes as soon as its file exists, and nothing from the site is stored in `srectl_spec.json` (the plugin is public).
+
+- The site is found in the scripts' order: a `--site` earlier on the line, then `SRE_HARNESS_SITE`, then `~/.config/sre-harness/site`. With no site, or a site.yaml with no `catalog: path:`, nothing completes and no error is shown.
+- `--service` offers bare names. `autonomy match|run --service` requires `component:<name>`, so it offers that form. Type `component:` anywhere else and you get the prefixed names. In `autonomy`, start with `c` (or `component:`): a bare name has no match there.
+- `--slo` offers the SLOs of the `--service` already on the line, or all SLOs, each shown with its service, when there is none.
+- `--services` takes a comma-separated list. It completes the part after the last comma and leaves out names already listed: `--services ingress,d<TAB>` → `ingress,dns`. It adds no trailing comma.
+
+The scan reads only a site's `catalog.path` and `slo.journeys_path` (from `site.yaml`), stays inside the site, and does not follow links. It is a line scanner, not a YAML parser, and a test holds it to the real loaders.
 
 ## Commands
 
@@ -76,4 +88,4 @@ A new script that is a command people run goes in `REGISTRY` in `scripts/srectl.
 
 ## Not in this version
 
-Prompting for missing flags, a menu or TUI, completion of service and SLO names, and use by agents.
+Prompting for missing flags, a menu or TUI, and use by agents.
