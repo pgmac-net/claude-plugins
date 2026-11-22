@@ -1,0 +1,1247 @@
+{
+  "spec": 1,
+  "entries": {
+    "incident": {
+      "script": "incident.py",
+      "help": "Open, update and close the record of an incident.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "open": {
+          "help": "create the tracking issue",
+          "options": [
+            {
+              "flags": [
+                "--title"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            },
+            {
+              "flags": [
+                "--severity"
+              ],
+              "value": true,
+              "choices": [
+                "P1",
+                "P2",
+                "P3",
+                "P4"
+              ],
+              "help": "provisional severity"
+            },
+            {
+              "flags": [
+                "--affected"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "hosts or services affected, as far as known"
+            },
+            {
+              "flags": [
+                "--services"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "catalog services affected, comma-separated (name or component:<name>)"
+            },
+            {
+              "flags": [
+                "--impact"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "what is broken, for whom"
+            },
+            {
+              "flags": [
+                "--drill"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "practice incident, tracked in the drill repository"
+            },
+            {
+              "flags": [
+                "--new"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "open even though other incidents are open"
+            },
+            {
+              "flags": [
+                "--auto"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "unattended triage: open in runner.tracker_repo (private), to be promoted"
+            }
+          ]
+        },
+        "promote": {
+          "help": "make an unattended triage a real incident on the site's tracker",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            },
+            {
+              "flags": [
+                "--by"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the responder who asked for it"
+            },
+            {
+              "flags": [
+                "--title"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "title for the public issue; default the triage's"
+            }
+          ]
+        },
+        "dismiss": {
+          "help": "close an unattended triage that is not an incident",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            },
+            {
+              "flags": [
+                "--by"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the responder who judged it"
+            },
+            {
+              "flags": [
+                "--reason"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            }
+          ]
+        },
+        "attach": {
+          "help": "adopt an existing tracking issue",
+          "options": [
+            {
+              "flags": [
+                "--reopen"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "reopen it if it is resolved (recorded in the timeline)"
+            }
+          ]
+        },
+        "status": {
+          "help": "show an incident's local state",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            }
+          ]
+        },
+        "set": {
+          "help": "edit facts in the issue body",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            },
+            {
+              "flags": [
+                "--severity"
+              ],
+              "value": true,
+              "choices": [
+                "P1",
+                "P2",
+                "P3",
+                "P4"
+              ],
+              "help": ""
+            },
+            {
+              "flags": [
+                "--final"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "mark the severity final rather than provisional"
+            },
+            {
+              "flags": [
+                "--phase"
+              ],
+              "value": true,
+              "choices": [
+                "Establishing picture",
+                "Diagnosing",
+                "Mitigating",
+                "Verifying",
+                "Resolved"
+              ],
+              "help": ""
+            },
+            {
+              "flags": [
+                "--affected"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            },
+            {
+              "flags": [
+                "--services"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "catalog services affected, comma-separated; replaces the list"
+            },
+            {
+              "flags": [
+                "--impact"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            },
+            {
+              "flags": [
+                "--runbook"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            }
+          ]
+        },
+        "gc": {
+          "help": "clear local state of incidents whose audit log has merged",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "clear only this incident (repeatable); the default is every incident"
+            },
+            {
+              "flags": [
+                "--apply"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "delete; the default is a dry run"
+            },
+            {
+              "flags": [
+                "--no-fetch"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "do not fetch the audit repository first"
+            },
+            {
+              "flags": [
+                "--ignore-issue-state"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "do not require the tracking issue to be closed"
+            },
+            {
+              "flags": [
+                "--token-days"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "age at which an unused bind token is removed"
+            },
+            {
+              "flags": [
+                "--quiet"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "print nothing"
+            }
+          ]
+        },
+        "close": {
+          "help": "mark the incident resolved",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": ""
+            }
+          ]
+        }
+      }
+    },
+    "timeline": {
+      "script": "timeline.py",
+      "help": "Write and read the timeline of an incident.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        },
+        {
+          "flags": [
+            "--incident"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "<repo-alias>-<number>; default is the current incident"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "add": {
+          "help": "post one typed entry",
+          "options": [
+            {
+              "flags": [
+                "--type"
+              ],
+              "value": true,
+              "choices": [
+                "discovery",
+                "milestone",
+                "action",
+                "update",
+                "handover",
+                "summary",
+                "decision"
+              ],
+              "help": ""
+            },
+            {
+              "flags": [
+                "--text"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "entry text; read from stdin when omitted"
+            },
+            {
+              "flags": [
+                "--at"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "when it happened, ISO 8601; default now"
+            },
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "handover": {
+          "help": "post a handover entry",
+          "options": [
+            {
+              "flags": [
+                "--state"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "State"
+            },
+            {
+              "flags": [
+                "--tried"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "Tried"
+            },
+            {
+              "flags": [
+                "--hypotheses"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "Open hypotheses"
+            },
+            {
+              "flags": [
+                "--next"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "Next step"
+            },
+            {
+              "flags": [
+                "--holder"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "Now with"
+            },
+            {
+              "flags": [
+                "--at"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "ISO 8601; default now"
+            },
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "list": {
+          "help": "print entries as JSON",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "due": {
+          "help": "is a status update due?",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "export": {
+          "help": "render the timeline as markdown",
+          "options": [
+            {
+              "flags": [
+                "--out"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "write to this file instead of stdout"
+            },
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        }
+      }
+    },
+    "audit": {
+      "script": "audit.py",
+      "help": "Work with the audit log of an incident.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        },
+        {
+          "flags": [
+            "--incident"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "<repo-alias>-<number>; default is the current incident"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "record": {
+          "help": "add an explicit record",
+          "options": [
+            {
+              "flags": [
+                "--kind"
+              ],
+              "value": true,
+              "choices": [
+                "approval",
+                "denial",
+                "decision",
+                "command",
+                "note"
+              ],
+              "help": ""
+            },
+            {
+              "flags": [
+                "--text"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "what was decided, approved or done, and why"
+            },
+            {
+              "flags": [
+                "--command"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the exact command this record is about"
+            },
+            {
+              "flags": [
+                "--approver"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "who approved or denied"
+            },
+            {
+              "flags": [
+                "--agent"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the agent writing this record, if it has no hook (codex, opencode, ...)"
+            },
+            {
+              "flags": [
+                "--model"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the model it runs, as provider/model"
+            },
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "show": {
+          "help": "where the log is and what it holds",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "verify": {
+          "help": "check the hash chain; list attempts that never completed",
+          "options": [
+            {
+              "flags": [
+                "--check-anchors"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "also compare with head hashes pinned in the timeline (needs gh)"
+            },
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "commit": {
+          "help": "commit the log to the audit repository and stop capture",
+          "options": [
+            {
+              "flags": [
+                "--no-pr"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "push the branch but do not open a pull request"
+            },
+            {
+              "flags": [
+                "--offline"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "skip the comparison with the timeline's pinned hashes"
+            },
+            {
+              "flags": [
+                "--amend"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "the log changed since it was committed: push it to the same branch"
+            },
+            {
+              "flags": [
+                "--unresolved"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "commit the log of an incident that is not resolved (ends capture; not allowed from chat)"
+            },
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        }
+      }
+    },
+    "autonomy": {
+      "script": "autonomy.py",
+      "help": "Decide whether a command is a pre-approved (Tier 2) action, and run it.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        },
+        {
+          "flags": [
+            "--incident"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "<repo-alias>-<number>; default is the current incident"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "match": {
+          "help": "say which tier a command is",
+          "options": [
+            {
+              "flags": [
+                "--command"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the exact command"
+            },
+            {
+              "flags": [
+                "--service"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the service being acted on, as component:<name>"
+            },
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "run": {
+          "help": "match and execute",
+          "options": [
+            {
+              "flags": [
+                "--command"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the exact command"
+            },
+            {
+              "flags": [
+                "--service"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the service being acted on, as component:<name>"
+            },
+            {
+              "flags": [
+                "--precondition-evidence"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "what you observed that satisfies the precondition"
+            },
+            {
+              "flags": [
+                "--timeout"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "seconds before the command is abandoned"
+            },
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        },
+        "list": {
+          "help": "show the allow-list",
+          "options": [
+            {
+              "flags": [
+                "--incident"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "<repo-alias>-<number>"
+            }
+          ]
+        }
+      }
+    },
+    "assist": {
+      "script": "assist.py",
+      "help": "Advisory second opinions during an incident, from a fast judgment model.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        },
+        {
+          "flags": [
+            "--incident"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "<repo-alias>-<number> whose audit log records the advice"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "severity": {
+          "help": "suggest a severity level",
+          "options": [
+            {
+              "flags": [
+                "--impact"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "what is broken, for whom"
+            },
+            {
+              "flags": [
+                "--affected"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "services or hosts affected"
+            }
+          ]
+        },
+        "runbooks": {
+          "help": "rank runbooks against symptoms",
+          "options": [
+            {
+              "flags": [
+                "--symptoms"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "what is being observed"
+            },
+            {
+              "flags": [
+                "--top"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "how many to return"
+            }
+          ]
+        },
+        "entry-type": {
+          "help": "suggest a timeline entry type",
+          "options": [
+            {
+              "flags": [
+                "--text"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "the entry text"
+            }
+          ]
+        }
+      }
+    },
+    "alerts": {
+      "script": "alerts.py",
+      "help": "Alerts that qualify for unattended triage.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "check": {
+          "help": "list the problems that would start a triage now",
+          "options": [
+            {
+              "flags": [
+                "--verbose"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "say why each other problem was skipped"
+            }
+          ]
+        }
+      }
+    },
+    "slo": {
+      "script": "slo.py",
+      "help": "Journeys and SLOs: check them, generate their recording rules, report their state.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "check": {
+          "help": "validate journeys and SLOs",
+          "options": []
+        },
+        "generate": {
+          "help": "write the recording rules",
+          "options": [
+            {
+              "flags": [
+                "--check"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "fail if the rules file is stale; write nothing"
+            }
+          ]
+        },
+        "dashboard": {
+          "help": "write the Grafana dashboard for every SLO",
+          "options": [
+            {
+              "flags": [
+                "--check"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "fail if the dashboard file is stale; write nothing"
+            }
+          ]
+        },
+        "status": {
+          "help": "attainment, budget remaining and state per SLO",
+          "options": [
+            {
+              "flags": [
+                "--service"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "only this service (name or component:<name>)"
+            },
+            {
+              "flags": [
+                "--slo"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "only this SLO"
+            }
+          ]
+        }
+      }
+    },
+    "budget": {
+      "script": "budget.py",
+      "help": "Error-budget enforcement and history: the Tier 2 gate, the Nagios check and daily snapshots.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "nagios": {
+          "help": "a Nagios check: budget state as an exit code and one line",
+          "options": [
+            {
+              "flags": [
+                "--service"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "only this service (name or component:<name>)"
+            },
+            {
+              "flags": [
+                "--slo"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "only this SLO"
+            }
+          ]
+        },
+        "snapshot": {
+          "help": "write daily budget snapshots, filling any missing day inside retention",
+          "options": [
+            {
+              "flags": [
+                "--out"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "history directory, one YYYY-MM.jsonl file per month"
+            },
+            {
+              "flags": [
+                "--today"
+              ],
+              "value": true,
+              "choices": null,
+              "help": "local date to treat as today (YYYY-MM-DD); for tests and reruns"
+            }
+          ]
+        }
+      }
+    },
+    "stpa": {
+      "script": "stpa.py",
+      "help": "Check, draw and list findings from STPA analyses in the site repository.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        }
+      ],
+      "required": true,
+      "commands": {
+        "check": {
+          "help": "check every analysis",
+          "options": [
+            {
+              "flags": [
+                "--json"
+              ],
+              "value": false,
+              "choices": null,
+              "help": ""
+            }
+          ]
+        },
+        "render": {
+          "help": "rewrite one analysis's diagram",
+          "options": []
+        },
+        "findings": {
+          "help": "uncontrolled loss scenarios of one analysis",
+          "options": [
+            {
+              "flags": [
+                "--json"
+              ],
+              "value": false,
+              "choices": null,
+              "help": ""
+            }
+          ]
+        }
+      }
+    },
+    "report": {
+      "script": "report.py",
+      "help": "Write the monthly reliability report: the product owner's SLA artefact.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        },
+        {
+          "flags": [
+            "--month"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "YYYY-MM; default is last month in the site's time zone"
+        },
+        {
+          "flags": [
+            "--history"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "the snapshot history directory"
+        },
+        {
+          "flags": [
+            "--out"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "file to write; default is standard output"
+        },
+        {
+          "flags": [
+            "--pirs"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "directory of PIRs for the backlog; default is the tracker's local checkout"
+        },
+        {
+          "flags": [
+            "--max-missing"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "days of snapshots a budgeted SLO may lack"
+        }
+      ],
+      "required": false,
+      "commands": {}
+    },
+    "trends": {
+      "script": "trends.py",
+      "help": "Rank the recommendations backlog from PIR trends and open action items.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path"
+        },
+        {
+          "flags": [
+            "--as-of"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "YYYY-MM-DD; default is today in the site's time zone"
+        },
+        {
+          "flags": [
+            "--pirs"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "directory of PIRs; default is the tracker repository's local checkout"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "value": false,
+          "choices": null,
+          "help": ""
+        }
+      ],
+      "required": false,
+      "commands": {}
+    },
+    "catalog check": {
+      "script": "catalog_check.py",
+      "help": "Validate a site's catalog and report drift between its two layers.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path (default: SRE_HARNESS_SITE, then ~/.config/sre-harness/site)"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "value": false,
+          "choices": null,
+          "help": "print the report as JSON"
+        }
+      ],
+      "required": false,
+      "commands": {}
+    },
+    "catalog sync": {
+      "script": "catalog_sync.py",
+      "help": "Regenerate the generated layer of a site's catalog from its sources.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path (default: SRE_HARNESS_SITE, then ~/.config/sre-harness/site)"
+        },
+        {
+          "flags": [
+            "--check"
+          ],
+          "value": false,
+          "choices": null,
+          "help": "exit 1 if the generated layer is stale or hand-edited"
+        },
+        {
+          "flags": [
+            "--check-live"
+          ],
+          "value": false,
+          "choices": null,
+          "help": "compare declared and running ArgoCD applications"
+        }
+      ],
+      "required": false,
+      "commands": {}
+    },
+    "site check": {
+      "script": "validate_site.py",
+      "help": "Validate an sre-harness site repository.",
+      "options": [
+        {
+          "flags": [
+            "--site"
+          ],
+          "value": true,
+          "choices": null,
+          "help": "site repository path (default: SRE_HARNESS_SITE, then ~/.config/sre-harness/site)"
+        },
+        {
+          "flags": [
+            "--json"
+          ],
+          "value": false,
+          "choices": null,
+          "help": "print the report as JSON"
+        }
+      ],
+      "required": false,
+      "commands": {}
+    }
+  }
+}

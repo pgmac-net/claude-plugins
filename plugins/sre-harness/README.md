@@ -197,10 +197,26 @@ uv run scripts/trends.py [--as-of YYYY-MM-DD] [--pirs <dir>] [--json]
 
 **From an alert.** With a `runner` section as well, the gateway polls the alert source and starts an **unattended triage** for new problems on services in the chosen tiers. A triage opens a private record, gathers evidence and proposes a fix, and changes nothing. When the first responder speaks, it becomes a normal chat incident, and the responder decides whether to promote it to the tracker or dismiss it. Rules: [gateway/README.md](gateway/README.md#unattended-triage), ADR 0018 and ADR 0019.
 
+## Command line
+
+`srectl` is for a person at a terminal: one command over the scripts, grouped by topic, with tab completion for bash, zsh and fish. Agents and skills keep running the scripts by full path (`uv run <plugin root>/scripts/<script>.py`), which is what the chat policy and the audit log match.
+
+```bash
+srectl                              # the groups
+srectl incident open --title "…" --severity P2 --affected "…" --impact "…"
+srectl timeline due
+srectl audit verify --check-anchors
+srectl catalog sync --check
+srectl site check --json
+```
+
+Everything after the group (and, for `catalog` and `site`, the verb) goes to the script unchanged, so the script's own `-h` is the reference. Install and completion setup: [docs/srectl.md](docs/srectl.md).
+
 ## Contents
 
 | Path | Purpose |
 |---|---|
+| `scripts/srectl.py`, `scripts/srectl_spec.json` | The person-facing command and its completion data, generated from the scripts' own argument parsers |
 | `skills/site-check/` | Finds and validates the site; shared reference for loading site configuration |
 | `skills/catalog-sync/` | Regenerates the generated layer, reports drift, proposes a pull request |
 | `skills/describe-service/` | Interviews the user and writes one service entry |

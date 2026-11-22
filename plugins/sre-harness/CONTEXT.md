@@ -166,6 +166,10 @@ _Avoid_: Segment, statement
 A command that runs another command it is given: ssh's remote command, `sh -c`, `sudo`, `watch`, `xargs`, `find -exec`, `docker exec`, `kubectl exec`. Mutation detection judges what it carries.
 _Avoid_: Wrapper (that is a carrier that runs its remaining words, such as `sudo` or `timeout`)
 
+**srectl**:
+The command a person types to run the harness scripts: one file, grouped by topic, with shell completion. It replaces itself with the script it names and adds no behaviour. Agents never use it; they run scripts by full path.
+_Avoid_: Wrapper (reserved for carriers), CLI (the scripts are the command line; srectl is a front end to them)
+
 **Unauthorised mutation**:
 A mutating simple command in the audit log with no approval recorded before it for the same words. A finding for a reviewer, not proof of wrongdoing.
 _Avoid_: Unapproved change, violation
