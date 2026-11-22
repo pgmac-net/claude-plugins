@@ -25,7 +25,7 @@ Ask one question at a time. Offer a concrete suggestion each time, drawn from th
 1. **The journey.** Who is the user, and what are they trying to get done? Name it as an action. Prefer the one most other things depend on.
 2. **The steps.** The critical steps, in order, that must all work. For each, the catalog entries it depends on (`dependsOn` of the service and its neighbours). Every reference must exist in the catalog.
 3. **The SLI per step.** Which signal shows the step worked, from what the backend already has (query it if you can). Prefer one SLI that covers every step, a synthetic probe walking the whole journey, over one per step. Say which steps an SLI does not cover, and why that is acceptable.
-   - A **probe** (gauge, `counter: false`) counts a prober that goes silent as failing: use it for the SLI that spends budget.
+   - A **probe** (gauge, `counter: false`) counts a prober that goes silent as failing (one that has not yet reported at all reads `unknown`, not exhausted): use it for the SLI that spends budget.
    - A **request ratio** (counter, `counter: true`) cannot tell this service's failure from an application behind it. Record it with `sre-harness/budget: "false"` unless the service owns every response.
 4. **The target and window.** The window must fit the backend's retention (`retention_days`); with 14 days, use 7d. Show the budget in minutes for each target you offer (window minutes × (1 − target)). Start where the service is today, not where it should be; say when to review it.
 5. **The error-budget policy.** What healthy, burning fast and exhausted each change for this service. At minimum: exhausted freezes risky changes to the service and what it depends on, and puts reliability work first. The freeze is enforced for the journey's own service. Ask which other services it also covers, and list them in the journey's `suspends:`: those are frozen too, with their pre-approved actions switched off, while the budget is exhausted. Name only what the owner agrees to; the catalog's dependencies are a prompt, not the answer.
@@ -50,7 +50,7 @@ After the rules are synced to the backend, confirm data arrives:
 uv run <plugin root>/scripts/slo.py status --service component:<name>
 ```
 
-`unknown` straight after a sync is normal; it should turn into a state within the shortest window.
+`unknown` straight after a sync is normal: a probe that has not yet reported leaves the SLO without data until its first sample, then it turns into a state within the shortest window. Build and start the prober before or soon after the rules sync; either order is safe, because a new SLO never reads exhausted before its first probe.
 
 ## Gotchas
 

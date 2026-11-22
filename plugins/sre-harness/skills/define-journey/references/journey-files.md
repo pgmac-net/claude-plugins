@@ -73,7 +73,7 @@ spec:
               query: probe_success{job="sre-probe-canary"}
 ```
 
-For a gauge, `total` is the same selector. The five-minute error is the share of reported probes that failed, so scrape jitter (four samples in a window instead of five) is not a failure; a prober silent for a whole window counts as failing.
+For a gauge, `total` is the same selector. The five-minute error is the share of reported probes that failed, so scrape jitter (four samples in a window instead of five) is not a failure; a prober that reported within the window and then went silent counts as failing. A prober that has never reported within the window records nothing, so the SLO reads `unknown` until its first sample instead of exhausted (claude-plugins#61); the same applies to one silent for the whole window.
 
 ## SLO: a request ratio, recorded but not budgeted
 
