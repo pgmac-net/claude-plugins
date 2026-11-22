@@ -51,4 +51,4 @@ Mutate nothing. `run` refuses during a drill; use `match` to exercise the path.
 
 ## What the review will check
 
-`audit.py verify` lists Tier 2 claims and their exit codes, and every mutating shell command that ran with no approval record for that exact command. Each of the latter has to be explained in the review. Its detection is pattern-based: it recognises common mutating commands, not every possible one.
+`audit.py verify` lists Tier 2 claims and their exit codes, and every mutating shell command that ran with no approval record for that exact command. Each of the latter has to be explained in the review. It judges each simple command by its program, through carriers (`audit-log.md`), and recognises common mutating commands, not every possible one.

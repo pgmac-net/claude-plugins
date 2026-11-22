@@ -28,6 +28,8 @@ uv run <plugin root>/scripts/audit.py record --kind approval \
   --command "<the exact command>" --approver "<who said yes>"
 ```
 
+`record` prints the words it will pair on (`approves: ...`); if they differ from what you will run, fix the `--command` before you run anything. Pairing is per simple command, on its words, so `-p {"a":1}` written plainly and `-p '{"a":1}'` in the shell match. The words must be the same: an extra flag (`--wait`, `--timeout`) makes a different command, so approve the command exactly as you will run it. An approval recorded earlier in the same Bash call as its command counts, but one recorded after it does not. One approval covers one run of one simple command, or of a whole command line if that is what was approved.
+
 Record a refusal the same way with `--kind denial`. An approval record is your statement that the person agreed; it is not proof that they did. Record only what was actually said. Then run the command, and write the `action` timeline entry once you have seen its effect.
 
 **Driven from chat, you record no approvals.** When the session runs through the chat gateway, a command that needs approval stops at a permission prompt; the gateway shows it to an approver, records their decision, bound to that one call, and then answers. State the blast radius in your message before you run the command, so the request can link to it. A refused or expired request comes back as a denial: do not retry the same command without asking again in the channel.
@@ -49,6 +51,8 @@ uv run <plugin root>/scripts/audit.py verify --check-anchors
 #   anything that touched the state directory? anything secret-shaped left after redaction?
 #   any mutating shell command with no approval for that exact command?
 ```
+
+`unauthorised_mutations` lists each Bash call with an unpaired mutation, and under `segments` the simple commands in it that no approval covers. A simple command is judged by its program, after `sudo`, `timeout`, `env` and similar wrappers. A carrier's payload is judged the same way: ssh's remote command, `sh -c`, `watch`, `xargs`, `find -exec`, `docker exec`, `kubectl exec`. So is a command substitution, and a heredoc fed to a shell. Prose in an argument (`--text`, `--body`, a commit message) is not a command, and changes made on your own machine (`git push`, `sed -i`, `mv`) are listed like any other. A command line that cannot be parsed, often one shortened by redaction, is judged by its whole text.
 
 ## Closing
 

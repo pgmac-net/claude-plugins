@@ -158,6 +158,18 @@ _Avoid_: Use, invocation
 Any action that changes the state of a system.
 _Avoid_: Write, change, fix
 
+**Simple command**:
+One program and its arguments, as the shell runs it between operators or newlines. The unit mutation detection judges and approvals pair on.
+_Avoid_: Segment, statement
+
+**Carrier**:
+A command that runs another command it is given: ssh's remote command, `sh -c`, `sudo`, `watch`, `xargs`, `find -exec`, `docker exec`, `kubectl exec`. Mutation detection judges what it carries.
+_Avoid_: Wrapper (that is a carrier that runs its remaining words, such as `sudo` or `timeout`)
+
+**Unauthorised mutation**:
+A mutating simple command in the audit log with no approval recorded before it for the same words. A finding for a reviewer, not proof of wrongdoing.
+_Avoid_: Unapproved change, violation
+
 **Blast radius**:
 What a mutation can affect if it goes wrong, stated before approval is asked.
 _Avoid_: Impact, risk
