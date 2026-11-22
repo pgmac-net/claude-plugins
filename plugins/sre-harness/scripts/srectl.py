@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -37,6 +38,12 @@ SHELLS = ("bash", "zsh", "fish")
 FILES = ":files"
 PATH_FLAGS = frozenset({"--site", "--out"})
 INCIDENT_FLAGS = frozenset({"--incident"})
+SERVICE_FLAGS = frozenset({"--service", "--services"})
+SLO_FLAGS = frozenset({"--slo"})
+SITE_ENV = "SRE_HARNESS_SITE"
+SERVICE_PREFIX = "component:"
+# Commands whose --service takes only the prefixed form; everywhere else a bare name is accepted too.
+PREFIX_REQUIRED = frozenset({("autonomy", "--service")})
 
 # (words that name the entry, script, section). A group of several entries has a verb after the group name.
 REGISTRY: tuple[tuple[tuple[str, ...], str, str], ...] = (
@@ -200,6 +207,139 @@ def incident_ids(env: dict[str, str] | None = None) -> list[str]:
         return []
 
 
+def option_value(line: list[str], flag: str) -> str | None:
+    """The value given for a flag earlier on the command line (`--flag value` or `--flag=value`), or None."""
+    found = None
+    for index, token in enumerate(line):
+        if token == flag and index + 1 < len(line):
+            found = line[index + 1]
+        elif token.startswith(f"{flag}="):
+            found = token[len(flag) + 1 :]
+    return found
+
+
+def find_site(line: list[str], env: dict[str, str] | None = None) -> Path | None:
+    """The site repository, in the order the scripts use (resolve_site): --site, the environment, the pointer file.
+
+    None for any problem: completion never reports one.
+    """
+    env = dict(os.environ) if env is None else env
+    explicit = option_value(line, "--site")
+    candidate: Path | None = None
+    if explicit:
+        candidate = Path(explicit)
+    elif env.get(SITE_ENV):
+        candidate = Path(env[SITE_ENV])
+    else:
+        pointer = Path(env.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "sre-harness" / "site"
+        try:
+            if pointer.is_dir():
+                candidate = pointer
+            elif pointer.is_file():
+                lines = pointer.read_text(encoding="utf-8").strip().splitlines()
+                candidate = Path(lines[0].strip()) if lines and lines[0].strip() else None
+        except OSError:
+            return None
+    if candidate is None:
+        return None
+    root = candidate.expanduser()
+    return root.resolve() if (root / "site.yaml").is_file() else None
+
+
+def _unquote(value: str) -> str:
+    value = value.split(" #", maxsplit=1)[0].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    return value
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _first_document(lines: list[str]) -> list[str]:
+    """The content lines of the first YAML document: no blanks or comments, cut at a later `---`."""
+    kept: list[str] = []
+    for line in lines:
+        if line.strip() == "---":
+            if kept:
+                break
+            continue
+        if line.strip() and not line.lstrip().startswith("#"):
+            kept.append(line)
+    return kept
+
+
+def yaml_child(lines: list[str], parent: str, child: str) -> str | None:
+    """The scalar `child:` directly under the top-level `parent:` block, read line by line.
+
+    This is not a YAML parser. It reads what completion needs from files the real loaders have already accepted.
+    Deeper keys of the same name are never taken.
+    """
+    inside = False
+    child_indent: int | None = None
+    for line in _first_document(lines):
+        if _indent(line) == 0:
+            inside = line.split(" #")[0].rstrip() == f"{parent}:"
+            child_indent = None
+        elif inside:
+            child_indent = _indent(line) if child_indent is None else child_indent
+            if _indent(line) == child_indent and line.strip().startswith(f"{child}:"):
+                return _unquote(line.strip()[len(child) + 1 :]) or None
+    return None
+
+
+def yaml_top(lines: list[str], key: str) -> str | None:
+    """The scalar value of a top-level `key:` line."""
+    for line in _first_document(lines):
+        if _indent(line) == 0 and line.startswith(f"{key}:"):
+            return _unquote(line[len(key) + 1 :]) or None
+    return None
+
+
+def _read_lines(path: Path, limit: int = 262144) -> list[str]:
+    try:
+        with path.open(encoding="utf-8") as handle:
+            return handle.read(limit).splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+
+
+def _files_under(site: Path, relative: str | None, pattern: str) -> list[Path]:
+    """Regular files matching a pattern under a directory of the site; never outside it, never through a link."""
+    if not relative:
+        return []
+    base = (site / relative).expanduser()
+    try:
+        base = base.resolve()
+        if not base.is_relative_to(site) or not base.is_dir():
+            return []
+        return sorted(p for p in base.rglob(pattern) if p.is_file() and not p.is_symlink())[:2000]
+    except OSError:
+        return []
+
+
+def site_names(site: Path | None) -> tuple[list[str], list[tuple[str, str]]]:
+    """Catalog Component names, and (SLO name, service) pairs, read from the site."""
+    if site is None:
+        return [], []
+    config = _read_lines(site / "site.yaml")
+    services: set[str] = set()
+    for path in _files_under(site, yaml_child(config, "catalog", "path"), "*.yaml"):
+        if path.name.endswith(".slo.yaml"):
+            continue
+        lines = _read_lines(path)
+        name = yaml_child(lines, "metadata", "name")
+        if yaml_top(lines, "kind") == "Component" and name:
+            services.add(name)
+    slos = {
+        (name, path.parent.name)
+        for path in _files_under(site, yaml_child(config, "slo", "journeys_path"), "*.slo.yaml")
+        if (name := yaml_child(_read_lines(path), "metadata", "name"))
+    }
+    return sorted(services), sorted(slos)
+
+
 def normalise_words(words: list[str]) -> list[str]:
     """Undo the shells' splitting of '--flag=value' (bash makes three words of it)."""
     words = list(words) or [""]
@@ -216,13 +356,37 @@ def _find_option(flag: str, *option_lists: list[dict[str, Any]]) -> dict[str, An
     return None
 
 
-def _value_candidates(flag: str, option: dict[str, Any], env: dict[str, str] | None) -> list[tuple[str, str]] | str:
+@dataclass
+class Where:
+    """What the value being completed can depend on: the command, the words before it, and what is typed of it."""
+
+    group: str
+    line: list[str]
+    typed: str
+    env: dict[str, str] | None
+
+
+def name_candidates(flag: str, where: Where) -> list[tuple[str, str]]:
+    """Service or SLO names read from the site: bare, or `component:<name>` where the command needs that form."""
+    services, slos = site_names(find_site(where.line, where.env))
+    if flag in SLO_FLAGS:
+        service = (option_value(where.line, "--service") or "").removeprefix(SERVICE_PREFIX)
+        return [(name, owner) for name, owner in slos if not service or owner == service]
+    head, comma, last = where.typed.rpartition(",") if flag == "--services" else ("", "", where.typed)
+    listed = {item.removeprefix(SERVICE_PREFIX) for item in head.split(",")}
+    prefix = SERVICE_PREFIX if (where.group, flag) in PREFIX_REQUIRED or last.startswith(SERVICE_PREFIX) else ""
+    return [(f"{head}{comma}{prefix}{name}", "service") for name in services if name not in listed]
+
+
+def _value_candidates(flag: str, option: dict[str, Any], where: Where) -> list[tuple[str, str]] | str:
     if option["choices"]:
         return [(choice, "") for choice in option["choices"]]
     if flag in INCIDENT_FLAGS:
-        return [(incident_id, "incident") for incident_id in incident_ids(env)]
+        return [(incident_id, "incident") for incident_id in incident_ids(where.env)]
     if flag in PATH_FLAGS:
         return FILES
+    if flag in SERVICE_FLAGS or flag in SLO_FLAGS:
+        return name_candidates(flag, where)
     return []
 
 
@@ -260,11 +424,11 @@ def _complete_group(
         return _filter([(v, spec["entries"].get(f"{group} {v}", {}).get("help", "")) for v in verbs(group)], cur)
     found = entry_for(prior)
     entry = spec["entries"].get(" ".join(found[0])) if found else None
-    return _complete_inside(entry, prior[len(found[0]) :], cur, env) if found and entry else []
+    return _complete_inside(entry, prior[len(found[0]) :], cur, env, prior) if found and entry else []
 
 
 def _complete_inside(
-    entry: dict[str, Any], rest: list[str], cur: str, env: dict[str, str] | None
+    entry: dict[str, Any], rest: list[str], cur: str, env: dict[str, str] | None, line: list[str]
 ) -> list[tuple[str, str]] | str:
     commands = entry["commands"]
     sub: str | None = None
@@ -280,11 +444,13 @@ def _complete_inside(
         elif sub is None and token in commands:
             sub = token
     if pending:
-        return _value_or_files(pending[0], pending[1], cur, env, "")
+        return _value_or_files(pending[0], pending[1], Where(line[0], line, cur, env), cur, "")
     if cur.startswith("--") and "=" in cur:
-        flag, _eq, _value = cur.partition("=")
+        flag, _eq, value = cur.partition("=")
         option = _find_option(flag, entry["options"], commands[sub]["options"] if sub else [])
-        return _value_or_files(flag, option, cur, env, f"{flag}=") if option and option["value"] else []
+        if not (option and option["value"]):
+            return []
+        return _value_or_files(flag, option, Where(line[0], line, value, env), cur, f"{flag}=")
     if cur.startswith("-"):
         pool = (commands[sub]["options"] if sub else []) + entry["options"]
         flags = sorted({(flag, option["help"]) for option in pool for flag in option["flags"] if flag.startswith("--")})
@@ -295,18 +461,22 @@ def _complete_inside(
 
 
 def _value_or_files(
-    flag: str, option: dict[str, Any], cur: str, env: dict[str, str] | None, head: str
+    flag: str, option: dict[str, Any], where: Where, cur: str, head: str
 ) -> list[tuple[str, str]] | str:
-    found = _value_candidates(flag, option, env)
+    found = _value_candidates(flag, option, where)
     return found if found == FILES else _filter(found, cur, head)  # type: ignore[arg-type]
 
 
 BASH = """\
 # srectl completion for bash: eval "$(srectl completion bash)"
 _srectl_complete() {
-    local line out
-    local -a words=("${COMP_WORDS[@]:1:COMP_CWORD}")
-    out=$("$1" __complete "${words[@]}" 2>/dev/null)
+    local line out tok pre i
+    local -a words
+    # COMP_WORDS splits on ':' and '=', which are part of service names and '--flag=value'. Use the line itself.
+    line=${COMP_LINE:0:COMP_POINT}
+    read -ra words <<<"$line"
+    [[ $line == *[[:space:]] ]] && words+=("")
+    out=$("$1" __complete "${words[@]:1}" 2>/dev/null)
     COMPREPLY=()
     if [[ $out == ":files" ]]; then
         compopt -o filenames 2>/dev/null
@@ -316,6 +486,18 @@ _srectl_complete() {
     while IFS= read -r line; do
         [[ -n $line ]] && COMPREPLY+=("${line%%$'\\t'*}")
     done <<<"$out"
+    # Bash replaces only the text after its last word break, so drop what comes before it from each candidate.
+    tok=${words[${#words[@]}-1]}
+    pre=""
+    for ((i = ${#tok} - 1; i >= 0; i--)); do
+        if [[ $COMP_WORDBREAKS == *"${tok:i:1}"* ]]; then
+            pre=${tok:0:i+1}
+            break
+        fi
+    done
+    if [[ -n $pre ]]; then
+        for i in "${!COMPREPLY[@]}"; do COMPREPLY[i]=${COMPREPLY[i]#"$pre"}; done
+    fi
 }
 complete -F _srectl_complete srectl sre
 """
