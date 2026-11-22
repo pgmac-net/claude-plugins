@@ -333,6 +333,13 @@ class TestAuditCli:
         assert audit.verify(audit.read_log("catalog-5"))["self_reported"] == 1
 
     @pytest.mark.usefixtures("incident")
+    def test_an_approval_stores_the_words_it_pairs_on_and_prints_them(self, capsys):
+        approved = 'kubectl patch deployment shop -p {"spec":{"replicas":2}}'
+        assert audit.main(["record", "--kind", "approval", "--text", "ok", "--command", approved]) == 0
+        assert log("catalog-5")[-1]["argv"] == ["kubectl", "patch", "deployment", "shop", "-p", "{spec:{replicas:2}}"]
+        assert "approves: kubectl patch deployment shop -p '{spec:{replicas:2}}'" in capsys.readouterr().out
+
+    @pytest.mark.usefixtures("incident")
     def test_verify_exit_code_follows_the_chain(self, capsys):
         audit.main(["record", "--kind", "note", "--text", "second record"])
         assert audit.main(["verify"]) == 0

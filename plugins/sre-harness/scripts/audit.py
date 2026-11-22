@@ -31,6 +31,7 @@ could not be used.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -46,6 +47,7 @@ from typing import Any
 
 import audit_hook
 import redact
+import shell_mutations
 import sre_common
 import timeline
 from sre_common import SiteError, guarded, load_site
@@ -103,8 +105,10 @@ def verify(entries: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
         "tier2_claims": events.get("tier2", 0),
         "unauthorised_mutations": unauthorised_mutations(entries),
         "mutation_detection": (
-            "pattern-based on shell commands, per simple command; a command too long to classify counts as a "
-            "mutation; file edits made with other tools are not classified"
+            "per simple command, by its program after wrappers, through carriers (ssh, sh -c, sudo, docker and "
+            "kubectl exec), heredocs fed to a shell and substitutions; approvals pair on the command's words; a "
+            "command too long or too malformed to parse is judged by its whole text; file edits made with other "
+            "tools are not classified"
         ),
         "rebinds": events.get("rebind", 0),
         "state_dir_access": state_dir_access(entries),
@@ -112,45 +116,22 @@ def verify(entries: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
     }
 
 
-# Commands that change a system. Deliberately broad: a false positive costs a line in a
-# report, a false negative hides an unapproved change. Matched anywhere in the command, so
-# a mutation wrapped in ssh, sudo or a shell pipeline is still seen.
-MUTATING = tuple(
-    re.compile(pattern)
-    for pattern in (
-        r"\bkubectl\b.{0,400}\b(delete|apply|create|patch|replace|edit|scale|cordon|uncordon|drain|taint|label)\b",
-        r"\bkubectl\b.{0,400}\b(annotate|set)\b",
-        r"\bkubectl\b.{0,400}\brollout\s+(restart|undo|pause|resume)\b",
-        r"\bhelm\b.{0,400}\b(install|upgrade|uninstall|rollback|delete)\b",
-        r"\bsystemctl\b.{0,200}\b(start|stop|restart|reload|enable|disable|kill|mask|unmask)\b",
-        r"\bservice\s+\S{1,100}\s+(start|stop|restart|reload)\b",
-        r"\bdocker\b.{0,200}\b(restart|stop|start|kill|rm|rmi|prune|run|exec)\b",
-        r"\b(docker\s+compose|docker-compose)\b.{0,200}\b(up|down|restart|stop|start|rm|pull)\b",
-        r"\b(crictl|ctr)\b.{0,200}\b(rm|rmp|rmi|stop|stopp|kill)\b",
-        r"\bterraform\b.{0,200}\b(apply|destroy|import|taint|untaint)\b|\bterraform\s+state\s+(rm|mv)\b",
-        r"\bansible(-playbook)?\b",
-        r"\b(reboot|shutdown|poweroff|halt)\b|\binit\s+[06]\b",
-        r"\b(rm|rmdir|mv|truncate|shred|dd|mkfs\S{0,20}|fsck\S{0,20}|mount|umount|chmod|chown|ln)\s",
-        r"\b(kill|pkill|killall)\b",
-        r"\bgit\b.{0,200}\b(push|reset|rebase|merge|revert)\b",
-        r"\b(apt|apt-get|dnf|yum|snap|pip|npm)\b.{0,200}\b(install|remove|purge|upgrade|refresh|uninstall)\b",
-        r"\b(iptables|nft)\b|\bip\s+(route|link|addr)\s+(add|del|delete|replace|flush|set)\b",
-        r"\bqm\s+(start|stop|shutdown|reset|reboot|destroy|set|migrate)\b",
-        r"\btee\b|\bsed\s+(-\S{0,8}i|--in-place)",
-    )
-)
-# The harness's own record-keeping changes the tracker and the audit branch; that is not a
-# system change. Only a segment that is itself one plain call of a harness script is exempt.
-HARNESS_SCRIPTS = frozenset(
-    {"incident.py", "timeline.py", "audit.py", "autonomy.py", "catalog_sync.py", "catalog_check.py", "validate_site.py"}
-)
-SCRIPTS_DIR = Path(__file__).resolve().parent
-SUBSTITUTION = re.compile(r"\$\(|`|<\(|>\(")
-MAX_CLASSIFY = 20000
+# The classifier lives in shell_mutations; these names are kept for the other scripts and the tests.
+MUTATING = shell_mutations.MUTATING
+HARNESS_SCRIPTS = shell_mutations.HARNESS_SCRIPTS
+SCRIPTS_DIR = shell_mutations.SCRIPTS_DIR
+SUBSTITUTION = shell_mutations.SUBSTITUTION
+MAX_CLASSIFY = shell_mutations.MAX_CLASSIFY
+is_mutation = shell_mutations.is_mutation
+_is_harness_call = shell_mutations.is_harness_call
 
 
-def _segments(command: str) -> list[list[str]] | None:
-    """Split a command into simple commands at unquoted shell operators. None if it cannot be parsed."""
+def command_segments(command: str) -> list[list[str]] | None:
+    """The simple commands in a shell line, split at unquoted operators; None if it cannot be parsed.
+
+    The plain split the chat tool policy matches its rules against; mutation detection uses
+    shell_mutations, which also reads newlines, heredocs, substitutions and carriers.
+    """
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     # bash starts a comment only at the start of a word; shlex would end the line at any "#" and hide what follows.
@@ -168,66 +149,86 @@ def _segments(command: str) -> list[list[str]] | None:
     return [segment for segment in segments if segment]
 
 
-def command_segments(command: str) -> list[list[str]] | None:
-    """The simple commands in a shell line, split at unquoted operators; None if it cannot be parsed."""
-    return _segments(command)
+def _readings(command: str, argv: Any = None) -> set[tuple[str, ...]]:
+    """The argv an approval's command text can mean: as shell words, as plain words, and as recorded."""
+    found = {tuple(command.split())}
+    with contextlib.suppress(ValueError):
+        found.add(tuple(shlex.split(command)))
+    if isinstance(argv, list) and all(isinstance(word, str) for word in argv):
+        found.add(tuple(argv))
+    return {reading for reading in found if reading}
 
 
-def _is_harness_call(tokens: list[str]) -> bool:
-    """True only for a plain call of one of this plugin's own scripts.
+@dataclass
+class _Approval:
+    command: str
+    readings: set[tuple[str, ...]]
+    used: bool = False
 
-    Accepted forms: '<script> …', 'uv run <script> …', 'python3 <script> …'. No
-    option may sit between the launcher and the script: an option could name
-    other code to run. The script must be given as an absolute path to a file
-    in this plugin's scripts directory, not merely a path that ends the same way.
+
+class _Credit:
+    """Approvals not yet spent, in the order they were recorded."""
+
+    def __init__(self) -> None:
+        self.approvals: list[_Approval] = []
+
+    def add(self, record: dict[str, Any]) -> None:
+        command = str(record["command"])
+        self.approvals.append(_Approval(command, _readings(command, record.get("argv"))))
+
+    def spend_whole(self, command: str) -> bool:
+        """Spend an approval written for this exact command line."""
+        return self._spend(lambda approval: approval.command == command)
+
+    def spend(self, candidates: set[tuple[str, ...]]) -> bool:
+        """Spend an approval for any of these simple commands."""
+        return self._spend(lambda approval: bool(approval.readings & candidates))
+
+    def _spend(self, matches: Any) -> bool:
+        for approval in self.approvals:
+            if not approval.used and matches(approval):
+                approval.used = True
+                return True
+        return False
+
+
+def _call_windows(entries: list[tuple[str, dict[str, Any]]]) -> dict[int, list[int]]:
+    """For each hook-captured Bash attempt, the self-reported approvals logged before it completed.
+
+    The hook writes a call's attempt before the call runs and its completion after, so an
+    approval that audit.py recorded from inside that call sits between the two.
     """
-    words = list(tokens)
-    if words[:2] == ["uv", "run"]:
-        words = words[2:]
-    elif words and re.fullmatch(r"python3?(\.\d+)?", words[0]):
-        words = words[1:]
-    if not words or words[0].startswith("-"):
-        return False
-    try:
-        given = Path(words[0]).expanduser()
-        # A relative path would be resolved against wherever verify happens to run, not
-        # where the command ran. Only an absolute path can be trusted to name our script.
-        if not given.is_absolute():
-            return False
-        script = given.resolve()
-    except (OSError, RuntimeError):
-        return False
-    return script.parent == SCRIPTS_DIR and script.name in HARNESS_SCRIPTS and script.is_file()
-
-
-def is_mutation(command: str) -> bool:
-    """Whether a shell command looks like it changes a system.
-
-    Fails closed: a command too long to classify, or one that cannot be parsed,
-    is treated by its whole text; substitution anywhere removes any exemption.
-    """
-    if not command.strip():
-        return False
-    if len(command) > MAX_CLASSIFY:
-        return True
-    segments = None if SUBSTITUTION.search(command) else _segments(command)
-    if segments is None:
-        return any(pattern.search(command) for pattern in MUTATING)
-    for tokens in segments:
-        if _is_harness_call(tokens):
-            continue
-        if any(pattern.search(" ".join(tokens)) for pattern in MUTATING):
-            return True
-    return False
+    open_calls: dict[tuple[Any, ...], list[int]] = {}
+    inside: dict[int, list[int]] = {}
+    finished: dict[int, list[int]] = {}
+    for index, (_line, record) in enumerate(entries):
+        event = record.get("event")
+        if record.get("capture") == "hook" and record.get("tool") == "Bash" and event in ("attempt", "complete"):
+            key = (record.get("session"), json.dumps(record.get("input"), sort_keys=True))
+            if event == "attempt":
+                open_calls.setdefault(key, []).append(index)
+                inside[index] = []
+            elif open_calls.get(key):
+                attempt = open_calls[key].pop(0)
+                finished[attempt] = inside.pop(attempt)
+        elif event == "approval" and record.get("via") != "chat" and record.get("command"):
+            for approvals in inside.values():
+                approvals.append(index)
+    # A call that never completed has no window: an approval after its attempt cannot be shown to precede its run.
+    return {attempt: approvals for attempt, approvals in finished.items() if approvals}
 
 
 def unauthorised_mutations(entries: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
-    """Mutating shell commands that ran with no recorded approval for that exact command.
+    """Mutating simple commands that ran with no recorded approval for that command.
 
-    An approval authorises one run of its command, and must come before it. Tier 2
-    actions do not appear here: autonomy.py executes them itself and records them, so a
-    pre-approved command typed into a shell instead is, correctly, reported.
-    Commands are compared as recorded, that is, after redaction on both sides.
+    An approval authorises one run of its command, and must come before it: in an earlier
+    call, or earlier in the same call (audit.py record, then the command). It is matched per
+    simple command on its words, so shell quoting does not matter, and the words must be
+    the same: an extra flag is a different command. An approval for a whole command line
+    covers every simple command in it. Tier 2 actions do not appear here: autonomy.py
+    executes them itself and records them, so a pre-approved command typed into a shell
+    instead is, correctly, reported. Commands are compared as recorded, that is, after
+    redaction on both sides.
     """
     # A chat approval names the one tool call it allowed. The hook records that call's
     # attempt before the permission check runs, so the approval can follow its attempt.
@@ -237,17 +238,19 @@ def unauthorised_mutations(entries: list[tuple[str, dict[str, Any]]]) -> list[di
         for _line, record in entries
         if record.get("event") == "approval" and record.get("via") == "chat" and record.get("tool_use_id")
     }
-    credit: dict[str, int] = {}
+    windows = _call_windows(entries)
+    claimed: set[int] = set()
+    credit = _Credit()
     found = []
-    for _line, record in entries:
+    for index, (_line, record) in enumerate(entries):
         event = record.get("event")
-        if event == "approval" and record.get("via") == "chat":
+        if index in claimed or (event == "approval" and record.get("via") == "chat"):
             continue
         approved_input = approved_calls.get(record.get("tool_use_id"))
         if event == "attempt" and approved_input == json.dumps(record.get("input"), sort_keys=True):
             continue
         if event == "approval" and record.get("command"):
-            credit[record["command"]] = credit.get(record["command"], 0) + 1
+            credit.add(record)
             continue
         if record.get("tool") == "Bash" and event == "attempt":
             command = str((record.get("input") or {}).get("command", ""))
@@ -255,13 +258,44 @@ def unauthorised_mutations(entries: list[tuple[str, dict[str, Any]]]) -> list[di
             command = str(record.get("command", ""))
         else:
             continue
-        if not is_mutation(command):
-            continue
-        if credit.get(command, 0) > 0:
-            credit[command] -= 1
-        else:
-            found.append({"ts": record["ts"], "command": command, "capture": record.get("capture")})
+        window = [number for number in windows.get(index, []) if number not in claimed]
+        unpaired = _unpaired(command, credit, (entries, window, claimed))
+        if unpaired:
+            found.append(
+                {"ts": record["ts"], "command": command, "capture": record.get("capture"), "segments": unpaired}
+            )
     return found
+
+
+def _unpaired(
+    command: str, credit: _Credit, call: tuple[list[tuple[str, dict[str, Any]]], list[int], set[int]]
+) -> list[str]:
+    """The mutating simple commands of one call that no approval covers, spending the approvals that cover the rest."""
+    entries, window, claimed = call
+    if not command.strip() or credit.spend_whole(command):
+        return []
+    found = None if len(command) > MAX_CLASSIFY else shell_mutations.units(command)
+    if found is None:
+        # Too long or unparsable: judged by its whole text, and only an approval of that text covers it.
+        return [command] if is_mutation(command) else []
+    local = _Credit()
+    unpaired: list[str] = []
+    for unit in found:
+        records_approval, literal = shell_mutations.approval_call(unit.argv)
+        if records_approval and window:
+            # The approval this segment wrote: the one naming its literal command, else the next in order.
+            number = next((n for n in window if entries[n][1].get("command") == literal), window[0])
+            window.remove(number)
+            claimed.add(number)
+            local.add(entries[number][1])
+            continue
+        for hit in unit.hits:
+            candidates = {hit, unit.argv}
+            if not (local.spend(candidates) or credit.spend(candidates)):
+                unpaired.append(shlex.join(hit))
+    # An approval recorded in this call and not used by it stands for a later call, like any other.
+    credit.approvals.extend(approval for approval in local.approvals if not approval.used)
+    return unpaired
 
 
 HARNESS_SCRIPT = re.compile(r"scripts/(?:incident|timeline|audit|autonomy)\.py\b")
@@ -334,8 +368,14 @@ def cmd_record(args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, 
         record["agent"], model = audit_hook.agent_of({"agent": args.agent or "unknown", "model": args.model})
         if model:
             record["model"] = model
+    if args.kind == "approval" and record.get("command"):
+        with contextlib.suppress(ValueError):
+            # The words the approval pairs on; verify also accepts the command split on spaces alone.
+            record["argv"] = shlex.split(record["command"])
     audit_hook.append(state["id"], record)
     print(f"{state['id']}: recorded {args.kind}")
+    if record.get("argv"):
+        print(f"approves: {shlex.join(record['argv'])}")
     return 0
 
 
