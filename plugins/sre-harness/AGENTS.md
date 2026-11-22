@@ -7,6 +7,7 @@ Which agents and models are known to work, and how well: `docs/supported-agents.
 ## Where things are
 
 - **The plugin root** is this directory. When a skill says `<plugin root>`, it means this directory's absolute path. Run scripts as `uv run <plugin root>/scripts/<script>.py …`, by full path, one command at a time.
+- **`srectl` is for people, not for you.** It is a terminal front end over these scripts. Never run it; the chat policy and the audit log recognise only the full-path form above.
 - **Skills** are in `skills/<name>/SKILL.md`. If your agent loads skills, point it at `skills/`. If it doesn't, read the matching `SKILL.md` yourself when the task fits its description (the `description:` line at the top), and follow it as written. Paths in a skill are relative to that skill's directory.
 - **The site** is a separate private repository with `site.yaml`. Scripts find it through `SRE_HARNESS_SITE` (its path) or `~/.config/sre-harness/site`. If neither is set, stop and ask; never guess a site.
 - **Terms** are defined in `CONTEXT.md`. Use them as defined.
