@@ -236,8 +236,10 @@ def test_probe_rules_count_missing_samples_as_failure(slo_site):
     group = slo.rule_group(found.slos[0])
     base = group["rules"][0]
     assert base["record"] == "slo:sli_error:ratio_rate5m"
-    assert base["expr"].endswith("or on() vector(1)")
-    assert base["expr"] == '1 - avg(avg_over_time(probe_success{job="canary"}[5m])) or on() vector(1)'
+    assert base["expr"] == (
+        '1 - avg(avg_over_time(probe_success{job="canary"}[5m])) '
+        'or on() (vector(1) and on() (count(count_over_time(probe_success{job="canary"}[7d])) > 0))'
+    )
     assert "sum_over_time" not in base["expr"], "counting samples against an expected number reads jitter as failure"
     assert base["labels"] == {
         "slo": "example-open-app",
@@ -256,6 +258,24 @@ def test_probe_rules_count_missing_samples_as_failure(slo_site):
         "slo:error_budget:remaining_ratio",
     ]
     assert group["rules"][-1]["expr"] == '1 - slo:sli_error:ratio_rate7d{slo="example-open-app"} / 0.005'
+
+
+def test_probe_rules_record_nothing_until_the_probe_has_reported(slo_site):
+    """A new SLO must not read exhausted before its first probe (claude-plugins#61)."""
+    found = slo.load(slo_site, site_doc(slo_site), REFS)
+    expr = slo.rule_group(found.slos[0])["rules"][0]["expr"]
+    # the fallback to failure is gated on the series having existed within the SLO's own window
+    assert "and on() (count(count_over_time(" in expr
+    assert f"[{found.slos[0].window}])) > 0)" in expr
+    assert not expr.endswith("or on() vector(1)")
+
+
+def test_unknown_state_names_both_causes(slo_site):
+    found = slo.load(slo_site, site_doc(slo_site), REFS)
+    result = slo.assess(found.slos[0], {})
+    assert result["state"] == "unknown"
+    assert "not synced" in result["reason"]
+    assert "not reported" in result["reason"]
 
 
 def test_counter_rules_treat_no_traffic_as_no_errors(slo_site):

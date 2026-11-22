@@ -266,9 +266,13 @@ def error_ratio_5m(slo: Slo) -> str:
         return f"(1 - sum(rate({slo.good}[{BASE_WINDOW}])) / {total}) and on() ({total} > 0) or on() vector(0)"
     # The share of reported probes that failed. Scrape timing puts four or five one-minute
     # samples in a five-minute window, so counting samples against an expected number
-    # would read jitter as failure. A prober silent for the whole window still counts as
-    # failing: with no samples the expression is empty and 'or vector(1)' applies.
-    return f"1 - avg(avg_over_time({slo.good}[{BASE_WINDOW}])) or on() vector(1)"
+    # would read jitter as failure. A prober that reported within the SLO's window and then
+    # went silent still counts as failing: the expression is empty and 'or vector(1)' applies.
+    # A prober that has never reported in the window records nothing, so status reads
+    # unknown: without that guard a new SLO records 1 from the rules sync until the first
+    # probe, and reads exhausted for hours after a healthy start (claude-plugins#61).
+    ever = f"count(count_over_time({slo.good}[{slo.window}])) > 0"
+    return f"1 - avg(avg_over_time({slo.good}[{BASE_WINDOW}])) or on() (vector(1) and on() ({ever}))"
 
 
 def rule_group(slo: Slo) -> dict[str, Any]:
@@ -397,7 +401,8 @@ def assess(slo: Slo, values: dict[str, float]) -> dict[str, Any]:
         "spends_budget": slo.budget,
     }
     if window_error is None:
-        return {**result, "state": "unknown", "reason": "no recorded data yet; are the rules synced?"}
+        reason = "no recorded data yet: the rules are not synced, or the probe has not reported within the window"
+        return {**result, "state": "unknown", "reason": reason}
     allowed = 1 - slo.target
     burn = {
         w: round(values[f"slo:sli_error:ratio_rate{w}"] / allowed, 2)

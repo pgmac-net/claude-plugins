@@ -125,7 +125,7 @@ A minimal backend that exists only to be probed, so a probe's failure means the 
 _Avoid_: Test app, dummy service
 
 **Probe**:
-A synthetic request made on a schedule from outside what it measures; its success ratio is an SLI. A probe that stops reporting counts as failing.
+A synthetic request made on a schedule from outside what it measures; its success ratio is an SLI. A probe that stops reporting counts as failing; one that has never reported within the SLO's window records nothing, so its status is `unknown` rather than exhausted (claude-plugins#61).
 _Avoid_: Ping, health check
 
 ### Incidents
