@@ -1,4 +1,4 @@
-# Window SLIs for probes are failed over total, not an average of five-minute ratios
+# Window SLIs are weighted by sample (probes) and by request (counters), not an average of five-minute ratios
 
 A probe SLO's window error ratio (1h, 6h, 1d and the SLO window) used to be the average of the recorded five-minute error ratios. This records why it is now failed probes over probes (claude-plugins#67).
 
@@ -12,6 +12,6 @@ A probe SLO's window error ratio (1h, 6h, 1d and the SLO window) used to be the 
 
 **Rollout restarts the windows.** The new series exist only from the moment the regenerated rules sync, so each probe SLO's 1h to 7d windows start from zero and refill. An SLO that is really burning budget starts burning again within minutes, because the five-minute and burn series did not change. The old averaged history is not blended in: it carries the bias for up to a window, to avoid a one-time reset.
 
-**Counter (request-ratio) SLOs are not changed here.** They average five-minute ratios, so a quiet hour weighs the same as a busy one. A one-minute `increase()` needs two samples and the scrape gives one, so the per-minute counts do not carry over: they need raw-window `increase()`. That is claude-plugins#68. The only counter SLO today is informational.
+**Counter (request-ratio) SLOs are weighted by request, from summed rates** (claude-plugins#68). They averaged five-minute ratios too, so a quiet hour weighed the same as a busy one: over a day of ingress traffic that ranged 2.3 times, the recorded 0.159% error was really 0.144%. Per-minute counts do not carry over, because `increase()` over one minute needs two samples and a 60 second scrape gives one. Two rules per counter SLO instead record `slo:sli_good:rate5m` and `slo:sli_total:rate5m`, the summed five-minute rates, and a window's ratio is `1 - sum_over_time(good) / sum_over_time(total)`. The five-minute rate windows overlap, so a request is counted about five times, equally in both sums, and that cancels in the ratio: no raw seven-day range and no second rule group. No traffic in the window reads as no errors, as the five-minute rule does. Rejected: a raw `increase(good[w]) / increase(total[w])` (exact, but a seven-day range every minute) and per-five-minute `increase()` in its own five-minute group (a second group and interval). Rollout resets a counter SLO's windows, like the probe change.
 
-Verified by evaluating the generated rules with `promtool test rules` (`tests/test_slo_rules_promtool.py`), against fixtures for each case above.
+Verified by evaluating the generated rules with `promtool test rules` (`tests/test_slo_rules_promtool.py`), against fixtures for each case above. For counters: a quiet hour with half its requests failing next to a busy clean hour reads 0.99% (the request-weighted 0.98%), where averaging gave 24.8%.

@@ -300,6 +300,18 @@ def bad_count_1m(slo: Slo) -> str:
     return f"({seen} - {passed}) or on() ({silent_minute(slo)})"
 
 
+def request_window_ratio(window: str, selector: str) -> str:
+    """PromQL for a counter SLO's error over a window, weighted by request.
+
+    Each five-minute rate window overlaps its neighbours, so a request is counted about five
+    times, in the good sum and in the total sum alike. That cancels in the ratio. No traffic in
+    the window reads as no errors, as the five-minute rule does.
+    """
+    good = f"sum_over_time(slo:sli_good:rate{BASE_WINDOW}{selector}[{window}])"
+    total = f"sum_over_time(slo:sli_total:rate{BASE_WINDOW}{selector}[{window}])"
+    return f"(1 - {good} / {total}) and on() ({total} > 0) or on() vector(0)"
+
+
 def rule_group(slo: Slo) -> dict[str, Any]:
     """The recording rules for one SLO.
 
@@ -308,11 +320,30 @@ def rule_group(slo: Slo) -> dict[str, Any]:
     window ratios are failed over total across the window. Averaging the overlapping five-minute ratios
     instead counts a sample in about five of them, which overweights a failure in a new SLO's first
     minutes, when those windows hold only one to four samples (claude-plugins#67).
+
+    A request-ratio (counter) SLO records the summed five-minute rates of good and total requests, and
+    its window ratios are request-weighted from those. Averaging five-minute ratios weighs a quiet
+    hour the same as a busy one (claude-plugins#68).
     """
     labels = {"slo": slo.name, "service": slo.service, "journey": slo.journey, "budget": str(slo.budget).lower()}
     selector = f'{{slo="{slo.name}"}}'
     rules: list[dict[str, Any]] = []
-    if not slo.counter:
+    if slo.counter:
+        rules.append(
+            {
+                "record": f"slo:sli_good:rate{BASE_WINDOW}",
+                "expr": f"sum(rate({slo.good}[{BASE_WINDOW}]))",
+                "labels": dict(labels),
+            }
+        )
+        rules.append(
+            {
+                "record": f"slo:sli_total:rate{BASE_WINDOW}",
+                "expr": f"sum(rate({slo.total}[{BASE_WINDOW}]))",
+                "labels": dict(labels),
+            }
+        )
+    else:
         rules.append({"record": "slo:sli_total:count1m", "expr": total_count_1m(slo), "labels": dict(labels)})
         rules.append({"record": "slo:sli_bad:count1m", "expr": bad_count_1m(slo), "labels": dict(labels)})
     rules.append(
@@ -320,7 +351,7 @@ def rule_group(slo: Slo) -> dict[str, Any]:
     )
     for window in windows(slo):
         if slo.counter:
-            expr = f"avg_over_time(slo:sli_error:ratio_rate{BASE_WINDOW}{selector}[{window}])"
+            expr = request_window_ratio(window, selector)
         else:
             expr = (
                 f"sum_over_time(slo:sli_bad:count1m{selector}[{window}]) "

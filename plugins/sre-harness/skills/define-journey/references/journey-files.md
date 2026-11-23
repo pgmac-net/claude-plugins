@@ -103,8 +103,9 @@ Per SLO, labelled `slo`, `service`, `journey` and `budget`:
 | Series | Meaning |
 |---|---|
 | `slo:sli_total:count1m`, `slo:sli_bad:count1m` | Probes seen and probes failed in the last minute (probe SLOs only). A minute with no sample after the probe has reported, and nothing for five minutes, records one failed probe. |
+| `slo:sli_good:rate5m`, `slo:sli_total:rate5m` | Summed five-minute rates of good and of all requests (request-ratio SLOs only). |
 | `slo:sli_error:ratio_rate5m` | Share of bad events in the last five minutes |
-| `slo:sli_error:ratio_rate1h`, `…6h`, `…1d`, `…<window>` | Failed over total in each window, so every probe counts once. Request-ratio (counter) SLOs still average the five-minute ratio. |
+| `slo:sli_error:ratio_rate1h`, `…6h`, `…1d`, `…<window>` | Failed over total in each window: every probe counts once, and for request-ratio SLOs every request does, so a busy hour outweighs a quiet one. No traffic in the window reads as no errors. |
 | `slo:objective:ratio` | The target |
 | `slo:error_budget:remaining_ratio` | 1 − error ratio over the window ÷ (1 − target); below 0 means exhausted |
 

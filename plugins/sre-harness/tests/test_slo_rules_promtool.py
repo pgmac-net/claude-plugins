@@ -180,3 +180,97 @@ def test_a_probe_that_never_reported_records_nothing(tmp_path):
         [PROMTOOL, "test", "rules", "test.yml"], cwd=tmp_path, capture_output=True, text=True, check=False
     )
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+# --- counter (request-ratio) SLOs: windows are weighted by request (claude-plugins#68) -------
+
+
+GOOD = 'reqs{status!~"5.."}'
+TOTAL = "reqs"
+COUNTER_LABELS = {"slo": "ex", "service": "svc", "journey": "j", "budget": "false"}
+
+
+def counter_labels() -> str:
+    return "{" + ",".join(f'{key}="{value}"' for key, value in COUNTER_LABELS.items()) + "}"
+
+
+def run_counter(tmp_path: Path, series: dict[str, str], expects: list[dict]) -> None:
+    """Write the rules for one counter SLO and a promtool test of them, and run it."""
+    counter = slo.Slo("ex", "svc", "j", 0.99, "1d", True, GOOD, TOTAL, False, None, "p")
+    (tmp_path / "rules.yml").write_text(
+        yaml.safe_dump({"groups": [slo.rule_group(counter)]}, sort_keys=False, width=400), encoding="utf-8"
+    )
+    inputs = [{"series": name, "values": values} for name, values in series.items()]
+    inputs.append({"series": 'other{job="x"}', "values": "1x400"})
+    test = {
+        "rule_files": ["rules.yml"],
+        "evaluation_interval": "1m",
+        "tests": [{"interval": "1m", "input_series": inputs, "promql_expr_test": expects}],
+    }
+    (tmp_path / "test.yml").write_text(yaml.safe_dump(test, sort_keys=False), encoding="utf-8")
+    done = subprocess.run(
+        [PROMTOOL, "test", "rules", "test.yml"], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def window_between(window: str, eval_time: str, low: float, high: float) -> dict:
+    """The window error lies in (low, high): promtool compares exact values, so bound them."""
+    expr = f"slo:sli_error:ratio_rate{window}{counter_labels()}"
+    return {
+        "expr": f"({expr} > bool {low}) * ({expr} < bool {high})",
+        "eval_time": eval_time,
+        "exp_samples": [{"labels": counter_labels(), "value": 1}],
+    }
+
+
+def window_value(window: str, eval_time: str, value: float | None) -> dict:
+    case: dict = {"expr": f"slo:sli_error:ratio_rate{window}{counter_labels()}", "eval_time": eval_time}
+    if value is not None:
+        case["exp_samples"] = [{"labels": f"slo:sli_error:ratio_rate{window}{counter_labels()}", "value": value}]
+    return case
+
+
+def test_a_busy_clean_hour_outweighs_a_quiet_hour_with_errors(tmp_path):
+    # Hour one: 2 requests a minute, half of them errors (60 errors). Hour two: 100 a minute, none
+    # fail. By request that is 60 / 6120 = about 0.98%. Averaging the five-minute ratios gave about
+    # 25%, the quiet hour's 50% weighed the same as the busy hour's 0%.
+    run_counter(
+        tmp_path,
+        {
+            'reqs{status="200"}': "0+1x59 59+99x70",
+            'reqs{status="500"}': "0+1x59 59x70",  # errors stop after hour one
+        },
+        [window_between("1d", "120m", 0.008, 0.012)],
+    )
+
+
+def test_steady_traffic_reads_its_error_share(tmp_path):
+    run_counter(
+        tmp_path,
+        {'reqs{status="200"}': "0+99x200", 'reqs{status="500"}': "0+1x200"},
+        [window_between("1d", "120m", 0.0095, 0.0105), window_between("1h", "120m", 0.0095, 0.0105)],
+    )
+
+
+def test_no_traffic_reads_no_errors(tmp_path):
+    # A counter that does not move: the rates are 0, so there is nothing to divide.
+    run_counter(
+        tmp_path,
+        {'reqs{status="200"}': "5x200"},
+        [window_value("1d", "120m", 0.0), window_value("1h", "120m", 0.0)],
+    )
+
+
+def test_a_counter_that_never_reported_reads_no_errors(tmp_path):
+    # Like the five-minute rule: no traffic is not an error, so there is always a value.
+    run_counter(tmp_path, {}, [window_value("1d", "120m", 0.0)])
+
+
+def test_a_counter_reset_is_not_an_error(tmp_path):
+    # The process restarted at minute 31 and its counter went back to 0. rate() handles the reset.
+    run_counter(
+        tmp_path,
+        {'reqs{status="200"}': "0+10x30 0+10x60"},
+        [window_value("1d", "80m", 0.0)],
+    )

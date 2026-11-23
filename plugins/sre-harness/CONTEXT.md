@@ -77,7 +77,7 @@ A path a user takes through a service to get something done, made of ordered cri
 _Avoid_: Flow, use case, user story
 
 **SLI**:
-A measured ratio of good events to all events for one journey step. For a probe, a window's ratio is failed probes over probes in that window, so each sample counts once, however early in the SLO's life it is (claude-plugins#67). One failure in a new SLO's first samples is a real 1-in-N error and reads exhausted until the window fills.
+A measured ratio of good events to all events for one journey step. For a probe, a window's ratio is failed probes over probes in that window, so each sample counts once, however early in the SLO's life it is (claude-plugins#67). One failure in a new SLO's first samples is a real 1-in-N error and reads exhausted until the window fills. For a request ratio, a window's ratio is weighted by request, so a busy hour outweighs a quiet one (claude-plugins#68).
 _Avoid_: Metric, KPI
 
 **SLO**:
