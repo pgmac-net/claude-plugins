@@ -58,3 +58,4 @@ uv run <plugin root>/scripts/slo.py status --service component:<name>
 - Keep SLI series few. On a free tier, every label value is a series: filter at the scraper so only what the SLI needs is shipped.
 - A journey whose prober runs on the same host as the thing it measures cannot see that host fail. Probe from outside.
 - The owner decides the target. You suggest and show the budget it implies.
+- A new SLO has little history. One failed probe in its first minutes is a real 1-in-N error (a 99% target reads exhausted until about a hundred probes are in the window). Avoid restarting the prober or injecting failures near the rules sync, and tell the owner to expect a few hours of `exhausted` if it happens.
