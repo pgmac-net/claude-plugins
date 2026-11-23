@@ -312,22 +312,36 @@ def test_counter_rules_treat_no_traffic_as_no_errors(slo_site):
     write_slo(slo_site, counter_slo(), name="requests")
     found = slo.load(slo_site, site_doc(slo_site), REFS)
     group = slo.rule_group(next(s for s in found.slos if s.counter))
-    rule = group["rules"][0]
-    assert rule["record"] == "slo:sli_error:ratio_rate5m"
+    rule = rule_named(group, "slo:sli_error:ratio_rate5m")
     assert "and on() (sum(rate(requests_total[5m])) > 0) or on() vector(0)" in rule["expr"]
     assert rule["labels"]["budget"] == "false"
 
 
-def test_counter_windows_are_unchanged_by_the_probe_weighting(slo_site):
-    """Only probe SLOs get per-minute counts; counter windows still average the 5m ratio (follow-up #68)."""
+def test_counter_windows_are_request_weighted(slo_site):
+    """Counter windows divide summed good rates by summed total rates, so a busy hour outweighs a quiet one (#68)."""
     write_slo(slo_site, counter_slo(), name="requests")
     found = slo.load(slo_site, site_doc(slo_site), REFS)
     group = slo.rule_group(next(s for s in found.slos if s.counter))
     records = [rule["record"] for rule in group["rules"]]
-    assert "slo:sli_total:count1m" not in records
-    assert "slo:sli_bad:count1m" not in records
+    assert records[:3] == ["slo:sli_good:rate5m", "slo:sli_total:rate5m", "slo:sli_error:ratio_rate5m"]
+    assert "slo:sli_total:count1m" not in records, (
+        "per-minute counts are for probes: increase() over 1m needs two samples"
+    )
+    assert rule_named(group, "slo:sli_total:rate5m")["expr"] == "sum(rate(requests_total[5m]))"
+    assert rule_named(group, "slo:sli_good:rate5m")["expr"].startswith("sum(rate(requests_total{")
+    selector = '{slo="example-requests"}'
+    good = f"sum_over_time(slo:sli_good:rate5m{selector}[7d])"
+    total = f"sum_over_time(slo:sli_total:rate5m{selector}[7d])"
     window = rule_named(group, "slo:sli_error:ratio_rate7d")["expr"]
-    assert window.startswith("avg_over_time(slo:sli_error:ratio_rate5m{")
+    assert window == f"(1 - {good} / {total}) and on() ({total} > 0) or on() vector(0)"
+    assert "avg_over_time" not in window, "averaging five-minute ratios weighs a quiet hour like a busy one"
+
+
+def test_probe_rules_are_not_changed_by_the_counter_weighting(slo_site):
+    found = slo.load(slo_site, site_doc(slo_site), REFS)
+    records = [rule["record"] for rule in slo.rule_group(found.slos[0])["rules"]]
+    assert records[:2] == ["slo:sli_total:count1m", "slo:sli_bad:count1m"]
+    assert "slo:sli_good:rate5m" not in records
 
 
 def test_generate_writes_then_check_passes_then_detects_staleness(slo_site, capsys):
