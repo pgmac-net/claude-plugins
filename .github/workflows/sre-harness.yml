@@ -43,6 +43,20 @@ jobs:
       - name: Pylint
         run: uv run --no-project $TEST_DEPS --with pylint pylint scripts tests
 
+      # promtool evaluates the generated SLO recording rules in tests/test_slo_rules_promtool.py
+      # (claude-plugins#67). Pinned and checksum-verified, as sre-catalog does for mimirtool.
+      - name: Install promtool
+        env:
+          PROMETHEUS_VERSION: "3.5.0"
+          PROMETHEUS_SHA256: e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -sSfLo prometheus.tar.gz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          echo "${PROMETHEUS_SHA256}  prometheus.tar.gz" | sha256sum -c -
+          tar -xzf prometheus.tar.gz --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          echo "SRE_PROMTOOL=${RUNNER_TEMP}/promtool" >> "$GITHUB_ENV"
+
       - name: Tests
         run: uv run --no-project $TEST_DEPS pytest -q
 

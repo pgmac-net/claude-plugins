@@ -275,20 +275,58 @@ def error_ratio_5m(slo: Slo) -> str:
     return f"1 - avg(avg_over_time({slo.good}[{BASE_WINDOW}])) or on() (vector(1) and on() ({ever}))"
 
 
+COUNT_WINDOW = "1m"
+
+
+def silent_minute(slo: Slo) -> str:
+    """A probe that reported within the SLO's window, but sent nothing for the last five minutes.
+
+    Such a minute counts as one failed probe, so silence still spends budget. A single empty
+    minute from scrape jitter does not match: the neighbouring samples are inside the five minutes.
+    """
+    ever = f"count(count_over_time({slo.good}[{slo.window}])) > 0"
+    return f"vector(1) and on() absent_over_time({slo.good}[{BASE_WINDOW}]) and on() ({ever})"
+
+
+def total_count_1m(slo: Slo) -> str:
+    """PromQL for the probes seen in the last minute, or one failed probe for a silent minute."""
+    return f"sum(count_over_time({slo.good}[{COUNT_WINDOW}])) or on() ({silent_minute(slo)})"
+
+
+def bad_count_1m(slo: Slo) -> str:
+    """PromQL for the failed probes in the last minute, or one for a silent minute."""
+    seen = f"sum(count_over_time({slo.good}[{COUNT_WINDOW}]))"
+    passed = f"sum(sum_over_time({slo.good}[{COUNT_WINDOW}]))"
+    return f"({seen} - {passed}) or on() ({silent_minute(slo)})"
+
+
 def rule_group(slo: Slo) -> dict[str, Any]:
+    """The recording rules for one SLO.
+
+    A probe (gauge) SLO records per-minute counts of probes and failed probes. The rule group runs
+    every minute, so the one-minute ranges do not overlap and each sample is counted exactly once. Its
+    window ratios are failed over total across the window. Averaging the overlapping five-minute ratios
+    instead counts a sample in about five of them, which overweights a failure in a new SLO's first
+    minutes, when those windows hold only one to four samples (claude-plugins#67).
+    """
     labels = {"slo": slo.name, "service": slo.service, "journey": slo.journey, "budget": str(slo.budget).lower()}
     selector = f'{{slo="{slo.name}"}}'
-    rules: list[dict[str, Any]] = [
+    rules: list[dict[str, Any]] = []
+    if not slo.counter:
+        rules.append({"record": "slo:sli_total:count1m", "expr": total_count_1m(slo), "labels": dict(labels)})
+        rules.append({"record": "slo:sli_bad:count1m", "expr": bad_count_1m(slo), "labels": dict(labels)})
+    rules.append(
         {"record": f"slo:sli_error:ratio_rate{BASE_WINDOW}", "expr": error_ratio_5m(slo), "labels": dict(labels)}
-    ]
+    )
     for window in windows(slo):
-        rules.append(
-            {
-                "record": f"slo:sli_error:ratio_rate{window}",
-                "expr": f"avg_over_time(slo:sli_error:ratio_rate{BASE_WINDOW}{selector}[{window}])",
-                "labels": dict(labels),
-            }
-        )
+        if slo.counter:
+            expr = f"avg_over_time(slo:sli_error:ratio_rate{BASE_WINDOW}{selector}[{window}])"
+        else:
+            expr = (
+                f"sum_over_time(slo:sli_bad:count1m{selector}[{window}]) "
+                f"/ sum_over_time(slo:sli_total:count1m{selector}[{window}])"
+            )
+        rules.append({"record": f"slo:sli_error:ratio_rate{window}", "expr": expr, "labels": dict(labels)})
     rules.append({"record": "slo:objective:ratio", "expr": f"vector({slo.target:g})", "labels": dict(labels)})
     rules.append(
         {

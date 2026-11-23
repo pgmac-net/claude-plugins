@@ -102,10 +102,13 @@ Per SLO, labelled `slo`, `service`, `journey` and `budget`:
 
 | Series | Meaning |
 |---|---|
+| `slo:sli_total:count1m`, `slo:sli_bad:count1m` | Probes seen and probes failed in the last minute (probe SLOs only). A minute with no sample after the probe has reported, and nothing for five minutes, records one failed probe. |
 | `slo:sli_error:ratio_rate5m` | Share of bad events in the last five minutes |
-| `slo:sli_error:ratio_rate1h`, `…6h`, `…1d`, `…<window>` | Its average over each window |
+| `slo:sli_error:ratio_rate1h`, `…6h`, `…1d`, `…<window>` | Failed over total in each window, so every probe counts once. Request-ratio (counter) SLOs still average the five-minute ratio. |
 | `slo:objective:ratio` | The target |
 | `slo:error_budget:remaining_ratio` | 1 − error ratio over the window ÷ (1 − target); below 0 means exhausted |
+
+A window holds only the samples recorded since the rules synced, so one failure in a new SLO's first samples is a real 1-in-N error: with a 99% target it reads exhausted until about a hundred probes are in the window. Do not fault-test a probe, or restart its prober, near the rules sync.
 
 `slo.py status` reads these and reports a state: **healthy**; **burning fast** (1-hour burn over 14.4 or 6-hour burn over 6); **exhausted** (no budget left); **unknown** (no data); **informational** (not budgeted). While a budgeted SLO is exhausted it is `frozen`, and its `freeze_scope` is the journey's service plus its `suspends:`. `budget.py nagios` reports the same states to Nagios, and `autonomy.py` keeps every service in the scope at Tier 1, failing closed when the state is unknown.
 

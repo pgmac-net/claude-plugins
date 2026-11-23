@@ -231,11 +231,14 @@ def test_tier_one_service_without_journeys_is_a_warning_not_an_error(edit_site):
 # --- recording rules -------------------------------------------------------------
 
 
+def rule_named(group: dict, record: str) -> dict:
+    return next(rule for rule in group["rules"] if rule["record"] == record)
+
+
 def test_probe_rules_count_missing_samples_as_failure(slo_site):
     found = slo.load(slo_site, site_doc(slo_site), REFS)
     group = slo.rule_group(found.slos[0])
-    base = group["rules"][0]
-    assert base["record"] == "slo:sli_error:ratio_rate5m"
+    base = rule_named(group, "slo:sli_error:ratio_rate5m")
     assert base["expr"] == (
         '1 - avg(avg_over_time(probe_success{job="canary"}[5m])) '
         'or on() (vector(1) and on() (count(count_over_time(probe_success{job="canary"}[7d])) > 0))'
@@ -249,6 +252,8 @@ def test_probe_rules_count_missing_samples_as_failure(slo_site):
     }
     records = [rule["record"] for rule in group["rules"]]
     assert records == [
+        "slo:sli_total:count1m",
+        "slo:sli_bad:count1m",
         "slo:sli_error:ratio_rate5m",
         "slo:sli_error:ratio_rate1h",
         "slo:sli_error:ratio_rate6h",
@@ -260,10 +265,35 @@ def test_probe_rules_count_missing_samples_as_failure(slo_site):
     assert group["rules"][-1]["expr"] == '1 - slo:sli_error:ratio_rate7d{slo="example-open-app"} / 0.005'
 
 
+def test_probe_windows_are_sample_weighted(slo_site):
+    """Window ratios divide failed probes by probes, so one sample counts once (claude-plugins#67)."""
+    found = slo.load(slo_site, site_doc(slo_site), REFS)
+    group = slo.rule_group(found.slos[0])
+    selector = '{slo="example-open-app"}'
+    for window in ("1h", "6h", "1d", "7d"):
+        expr = rule_named(group, f"slo:sli_error:ratio_rate{window}")["expr"]
+        assert expr == (
+            f"sum_over_time(slo:sli_bad:count1m{selector}[{window}]) "
+            f"/ sum_over_time(slo:sli_total:count1m{selector}[{window}])"
+        )
+        assert "avg_over_time" not in expr, "averaging overlapping 5m ratios counts a sample about five times"
+    total = rule_named(group, "slo:sli_total:count1m")["expr"]
+    bad = rule_named(group, "slo:sli_bad:count1m")["expr"]
+    assert total.startswith('sum(count_over_time(probe_success{job="canary"}[1m]))')
+    assert bad.startswith(
+        '(sum(count_over_time(probe_success{job="canary"}[1m])) - sum(sum_over_time(probe_success{job="canary"}[1m])))'
+    )
+    # silence after reporting still counts as failing, gated on the probe having reported in the window
+    for expr in (total, bad):
+        assert 'absent_over_time(probe_success{job="canary"}[5m])' in expr
+        assert 'count(count_over_time(probe_success{job="canary"}[7d])) > 0' in expr
+    assert group["interval"] == "1m", "the 1m ranges only tile without overlap if the group runs every minute"
+
+
 def test_probe_rules_record_nothing_until_the_probe_has_reported(slo_site):
     """A new SLO must not read exhausted before its first probe (claude-plugins#61)."""
     found = slo.load(slo_site, site_doc(slo_site), REFS)
-    expr = slo.rule_group(found.slos[0])["rules"][0]["expr"]
+    expr = rule_named(slo.rule_group(found.slos[0]), "slo:sli_error:ratio_rate5m")["expr"]
     # the fallback to failure is gated on the series having existed within the SLO's own window
     assert "and on() (count(count_over_time(" in expr
     assert f"[{found.slos[0].window}])) > 0)" in expr
@@ -281,9 +311,23 @@ def test_unknown_state_names_both_causes(slo_site):
 def test_counter_rules_treat_no_traffic_as_no_errors(slo_site):
     write_slo(slo_site, counter_slo(), name="requests")
     found = slo.load(slo_site, site_doc(slo_site), REFS)
-    rule = slo.rule_group(next(s for s in found.slos if s.counter))["rules"][0]
+    group = slo.rule_group(next(s for s in found.slos if s.counter))
+    rule = group["rules"][0]
+    assert rule["record"] == "slo:sli_error:ratio_rate5m"
     assert "and on() (sum(rate(requests_total[5m])) > 0) or on() vector(0)" in rule["expr"]
     assert rule["labels"]["budget"] == "false"
+
+
+def test_counter_windows_are_unchanged_by_the_probe_weighting(slo_site):
+    """Only probe SLOs get per-minute counts; counter windows still average the 5m ratio (follow-up #68)."""
+    write_slo(slo_site, counter_slo(), name="requests")
+    found = slo.load(slo_site, site_doc(slo_site), REFS)
+    group = slo.rule_group(next(s for s in found.slos if s.counter))
+    records = [rule["record"] for rule in group["rules"]]
+    assert "slo:sli_total:count1m" not in records
+    assert "slo:sli_bad:count1m" not in records
+    window = rule_named(group, "slo:sli_error:ratio_rate7d")["expr"]
+    assert window.startswith("avg_over_time(slo:sli_error:ratio_rate5m{")
 
 
 def test_generate_writes_then_check_passes_then_detects_staleness(slo_site, capsys):
