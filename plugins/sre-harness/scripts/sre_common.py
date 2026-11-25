@@ -72,6 +72,15 @@ def resolve_site(
     env = dict(os.environ) if env is None else env
     home = Path.home() if home is None else home
 
+    if explicit and env.get(NO_CURRENT_ENV):
+        # Under the chat gateway an allow-listed script runs without approval; another site.yaml could name
+        # any variable as a token and any host to send it to. Only the gateway's own site may be named.
+        own = resolve_site(None, env, home)
+        named = Path(explicit).expanduser().resolve()
+        if named != own:
+            raise SiteError("this session is driven from chat; --site may only name the gateway's own site")
+        return own
+
     candidate: Path | None = None
     source = ""
     if explicit:
