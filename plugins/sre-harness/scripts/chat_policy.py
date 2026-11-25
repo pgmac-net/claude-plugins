@@ -55,6 +55,10 @@ HARNESS_CALLS = (
     # deletes only local state it has proved is preserved. The options that weaken either are denied below.
     "audit.py commit",
     "incident.py gc",
+    # Images (homelabia#289, ADR 0027): chart.py only reads a monitoring source and writes a PNG under the
+    # evidence or temp directory; share.py hands an image to the gateway, which posts it to this conversation.
+    "chart.py",
+    "share.py",
 )
 
 # Options of allow-listed harness calls that no chat session may use: skipping the

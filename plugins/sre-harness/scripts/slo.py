@@ -431,6 +431,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
+def authorise(request: urllib.request.Request, settings: dict[str, Any], token: str) -> None:
+    """Attach the read token: basic auth with slo.user (a hosted instance), else a bearer token. Never redirected."""
+    if settings.get("user"):
+        pair = base64.b64encode(f"{settings['user']}:{token}".encode()).decode()
+        request.add_unredirected_header("Authorization", f"Basic {pair}")
+    else:
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+
+
 def query(settings: dict[str, Any], promql: str, token: str, at: float | None = None) -> list[dict[str, Any]]:
     """An instant query against the backend, now or at a Unix time.
 
@@ -439,13 +448,17 @@ def query(settings: dict[str, Any], promql: str, token: str, at: float | None = 
     params: dict[str, str] = {"query": promql}
     if at is not None:
         params["time"] = f"{at:.0f}"
-    url = settings["url"].rstrip("/") + "/api/v1/query?" + urllib.parse.urlencode(params)
+    return api_get(settings, "/api/v1/query", params, token)
+
+
+def api_get(settings: dict[str, Any], path: str, params: dict[str, str], token: str) -> list[dict[str, Any]]:
+    """One query API call (/api/v1/query, /api/v1/query_range) and its result list.
+
+    Raises SiteError with the backend's message, never the token.
+    """
+    url = settings["url"].rstrip("/") + path + "?" + urllib.parse.urlencode(params)
     request = urllib.request.Request(url)  # noqa: S310 - the URL is site configuration, https or localhost only
-    if settings.get("user"):
-        pair = base64.b64encode(f"{settings['user']}:{token}".encode()).decode()
-        request.add_unredirected_header("Authorization", f"Basic {pair}")
-    else:
-        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    authorise(request, settings, token)
     try:
         with _OPENER.open(request, timeout=QUERY_TIMEOUT) as response:
             body = json.loads(response.read().decode())

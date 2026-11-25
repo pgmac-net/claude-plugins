@@ -59,6 +59,16 @@ A responder can attach a snippet or text file (a log excerpt, a config) to a mes
 - **Not read means said.** A file that is skipped is reported to its sender, and only to them, with the reason. A message with a file and no text still reaches the agent.
 - **Slack scope.** Reading needs the `files:read` bot scope, which is in the manifest. Adding it to an installed app means reinstalling the app to the workspace; the tokens do not change. Without it Slack refuses the download, the sender is told, and the typed text still gets through.
 
+## Images
+
+The agent can draw a graph and post it into the conversation: an incident channel, a triage thread or a question thread. Design: [ADR 0027](../docs/adr/0027-images-are-shared-through-an-allow-listed-script-and-never-redacted.md).
+
+- **Draw.** `chart.py prom '<promql>' --since 6h -o <file>.png` runs a range query against the site's metrics backend (`slo.url` and its read token), at most 7 days and 20 series. `chart.py nagios <host> '<service>' --period day -o <file>.png` fetches the nagiosgraph graph through a signed graph proxy (`graph_proxy` on the nagios monitoring entry; the signing key sits in `~/.config/sre-harness/<key_file>`, mode 600, which the agent cannot read). A chart is written only under the evidence directory or the system temp directory. Exit 3 means no data.
+- **Post.** `share.py <file> --title "<host, metric, window>"` checks the file is a PNG, JPEG, GIF or WebP by its content (not its name), under `chat.images.max_mb` (default 5 MB) and not in a denied location, and spools it. The gateway sees the call, loads the image from the spool (never from what the agent printed), and uploads it to that conversation's channel or thread. Both scripts run without approval in every policy.
+- **What is kept.** For an incident: a copy in the harness state, committed beside the audit log at close-out as `<audit path>/<id>.images/<sha256>.<type>`, and one in `<evidence_dir>/<id>/` for the review. The tracking issue gets one line (caption, size, digest, link to the file in Slack), never the image. For a question: a copy beside its log, pruned with it. Before a record is opened, the image is posted and not kept.
+- **Not redacted.** An image cannot be scrubbed the way text is; the caption is. The agent is told never to post an image of a secret.
+- **Slack scope.** Uploading needs the `files:write` bot scope (in the manifest; reinstall the app after adding it). Uploads use `files.getUploadURLExternal` and `files.completeUploadExternal`, which the free plan has. Without the scope the channel is told the image could not be posted, and why. The free plan hides files older than 90 days; the kept copies outlive that.
+
 ## Unattended triage
 
 With a `runner` section in `site.yaml` and `enabled: true`, the gateway also starts incidents itself. Design: [ADR 0018](../docs/adr/0018-unattended-triage-runs-in-the-gateway-triage-only-until-a-responder-speaks.md) and [ADR 0019](../docs/adr/0019-unattended-triage-is-private-until-a-responder-promotes-it.md).
@@ -94,7 +104,7 @@ The allow-list is not a sandbox. Claude Code itself lets a fixed set of read-onl
 
 Needs `uv`, the `gh` CLI signed in, `kubectl` if the agent should read a cluster, and a checkout of the site repository. The Claude Code CLI comes bundled with the Agent SDK.
 
-1. **The Slack app.** Create it from [`slack-app-manifest.yaml`](slack-app-manifest.yaml) and install it to the workspace. Create an app-level token with `connections:write`. The manifest includes the `files:read` scope, which an app installed before that scope existed lacks: add it under OAuth & Permissions and reinstall. Upload [`../assets/icon-1024.png`](../assets/icon-1024.png) as the app icon (Basic Information > Display Information; a manifest cannot carry an icon). Invite the bot to the hub channel.
+1. **The Slack app.** Create it from [`slack-app-manifest.yaml`](slack-app-manifest.yaml) and install it to the workspace. Create an app-level token with `connections:write`. The manifest includes the `files:read` and `files:write` scopes, which an app installed before they existed lacks: add them under OAuth & Permissions and reinstall. Upload [`../assets/icon-1024.png`](../assets/icon-1024.png) as the app icon (Basic Information > Display Information; a manifest cannot carry an icon). Invite the bot to the hub channel.
 2. **The Claude token.** Run `claude setup-token` on a machine where you are signed in to Claude.
 3. **Site configuration.** Fill in `chat` in `site.yaml` (schema v4) with the hub channel ID and the responder and approver user IDs, and run `validate_site.py`.
 4. **Environment file.** Create `~/.config/sre-harness/gateway.env`, mode 0600:
@@ -185,6 +195,8 @@ Switch back by removing `SRE_GATEWAY_AGENT` and restarting. Sessions in progress
 | Under Pi, a command slips past the allow-list | Strict matcher: one plain command only, deny rules checked on every part, paths resolved through symlinks, a search that could reach a denied file asks first | It asks more often than Claude Code; approvers see more requests |
 | Under Pi, a chat message runs a Pi command | A message starting with `/` is passed as text | — |
 | Unreviewed text on a public tracker | Triage records open in a private repository; only a responder's `promote` makes one public, carrying conclusions, not evidence | — |
+| An allow-listed share posts a file it should not | share.py takes images only, by content, never from a denied location; the gateway uploads only what is in the spool and still hashes to its name, and only to the conversation whose agent ran it | An image the agent can read and that shows something sensitive can still be posted. Images are not redacted |
+| An allow-listed chart writes or reaches somewhere it should not | Output only as `.png` under the evidence or temp directory; queries only to the site's metrics backend and graph proxy, https, no redirects; credentials only from owner-only files the agent cannot read | A heavy PromQL query costs the backend; ranges are capped at 7 days and 20 series |
 
 ## Development
 

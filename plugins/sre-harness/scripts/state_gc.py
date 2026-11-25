@@ -24,6 +24,7 @@ names match the incident id pattern, inside the state directory, are removed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import subprocess  # noqa: S404 - fixed argv, no shell
@@ -77,6 +78,10 @@ def files_of(state: Path, incident_id: str) -> list[Path]:
     """The local files that belong to one incident."""
     found = [state / "audit" / f"{incident_id}{suffix}" for suffix in (".jsonl", ".closed", ".lock")]
     found.append(state / "incidents" / f"{incident_id}.json")
+    # Images the gateway posted (ADR 0027): committed beside the log, so they go when it is preserved.
+    images = state / "images" / incident_id
+    if images.is_dir() and not images.is_symlink():
+        found += sorted(images.iterdir())
     sessions = state / "sessions"
     if sessions.is_dir():
         found += [p for p in sessions.glob("*.json") if _read_json(p).get("incident") == incident_id]
@@ -250,6 +255,9 @@ def run(
     if apply:
         for path in [*(Path(p) for p in sorted(listed)), *tokens]:
             deleted += _remove(path, state)
+        for incident_id in (v["id"] for v in cleared):
+            with contextlib.suppress(OSError):
+                (state / "images" / incident_id).rmdir()  # only once empty: never recursive
         audit_hook.release_active_marker()
     return {
         "dry_run": not apply,

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from sre_gateway import attachments, harness, prompts, questions
+from sre_gateway import attachments, harness, images, prompts, questions
 from sre_gateway.agent import (
     AgentDriver,
     AskPermission,
@@ -88,6 +88,8 @@ class Settings:
     state_dir: Path
     question_idle_seconds: int = 300
     attachments: Limits = Limits()
+    # incident.evidence_dir: a copy of each image posted for an incident goes to <evidence_dir>/<incident id>/.
+    evidence_dir: Path | None = None
 
 
 @dataclass
@@ -757,6 +759,7 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         elif isinstance(event, ToolOutput):
             if session.indicator is not None:
                 session.indicator.set_activity(THINKING)
+            await self._on_share(session, event)
             if session.question:
                 # A question has no record to follow: its output is only logged, never read for incident calls.
                 session.calls.pop(event.tool_use_id, None)
@@ -792,6 +795,21 @@ class Gateway:  # pylint: disable=too-many-instance-attributes
         elif kind == "dismiss" and session.conv.incident:
             self._end(session)
             await self._announce(f"Unattended triage {session.conv.incident} dismissed: not an incident.")
+
+    # --- shared images (ADR 0027) -------------------------------------------------
+
+    async def _on_share(self, session: Session, event: ToolOutput) -> None:
+        """Post the images a share.py run spooled, to this conversation and nowhere else."""
+        call = session.calls.get(event.tool_use_id)
+        command = str(call.input.get("command", "")) if call is not None and call.name == "Bash" else ""
+        if event.is_error or not harness.share_call(command):
+            return
+        where = images.Destination(session.place, session.conv.incident, self.settings.evidence_dir, session.qlog)
+        for image in harness.shared_images(event.text):
+            outcome = await images.deliver(self.chat, self.tracker, self._scrub, image, where)
+            session.last_problem = outcome.problem or session.last_problem
+            if outcome.say:
+                await self._say(session.place, outcome.say)
 
     def _end(self, session: Session) -> None:
         """The incident is resolved or dismissed: it takes no more alerts and no triage slot."""

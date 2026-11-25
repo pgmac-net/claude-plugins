@@ -31,6 +31,34 @@ class RecordingClient:
             raise SlackApiError("refused", {"ok": False, "error": "team_not_on_paid_plan"})
 
     refuse = False
+    upload_error: str | None = None
+
+    async def files_upload_v2(self, **kwargs):
+        self.calls.append(("upload", kwargs))
+        if self.upload_error:
+            raise SlackApiError("refused", {"ok": False, "error": self.upload_error})
+        return {"ok": True, "files": [{"id": "F1", "permalink": "https://x.slack.com/files/F1"}]}
+
+
+async def test_an_upload_goes_to_the_thread_with_an_escaped_caption():
+    chat = adapter()
+    link = await chat.upload(Place("C1", "9.0"), b"\x89PNG", "abc.png", "load <!channel> & <@U1>")
+    kind, call = chat._client.calls[0]  # pylint: disable=protected-access
+    assert kind == "upload"
+    assert (call["channel"], call["thread_ts"], call["file"], call["filename"]) == ("C1", "9.0", b"\x89PNG", "abc.png")
+    assert call["initial_comment"] == "load &lt;!channel&gt; &amp; &lt;@U1&gt;"
+    assert link == "https://x.slack.com/files/F1"
+
+
+@pytest.mark.parametrize(
+    ("error", "said"),
+    [("missing_scope", "files:write"), ("not_in_channel", "not in this channel"), ("ratelimited", "ratelimited")],
+)
+async def test_a_refused_upload_says_why(error, said):
+    chat = adapter()
+    chat._client.upload_error = error  # pylint: disable=protected-access
+    with pytest.raises(slack.UploadRefused, match=said):
+        await chat.upload(Place("C1"), b"\x89PNG", "abc.png", "load")
 
 
 def adapter(hosts=("github.com", "*.grafana.net")):

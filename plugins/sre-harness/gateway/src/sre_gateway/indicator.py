@@ -281,5 +281,15 @@ class IndicatedChat:
         finally:
             await indicator.after_post()
 
+    async def upload(self, place: Place, data: bytes, filename: str, title: str) -> str | None:
+        indicator = self._at(place)
+        if indicator is None:
+            return await self._chat.upload(place, data, filename, title)
+        await indicator.before_post()
+        try:
+            return await self._chat.upload(place, data, filename, title)
+        finally:
+            await indicator.after_post()
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._chat, name)

@@ -140,6 +140,14 @@ class ChatAdapter(Protocol):
     async def download(self, file: FileRef, max_bytes: int) -> bytes:
         """The file's bytes, at most max_bytes of them. Raises FileUnavailable, with a reason a person can read."""
 
+    async def upload(self, place: Place, data: bytes, filename: str, title: str) -> str | None:
+        """Post an image the agent shared (ADR 0027), captioned with title, escaped as post() escapes text.
+        Returns a link to it, if the platform gives one. Raises UploadRefused when the platform says no."""
+
+
+class UploadRefused(Exception):
+    """The platform would not take an upload; the message is the reason, safe to show in the channel."""
+
 
 class NameTaken(Exception):
     """A channel with that name already exists."""

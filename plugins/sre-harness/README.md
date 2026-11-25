@@ -242,6 +242,8 @@ Everything after the group (and, for `catalog` and `site`, the verb) goes to the
 | `scripts/stpa.py` | STPA analyses: `check`, `render` (Mermaid diagram), `findings` |
 | `scripts/trends.py` | The recommendations backlog: themes, stale action items, repeat incidents, design reviews due |
 | `scripts/kube_read.py` | Read-only kubectl for an agent driven from chat: allowed verbs and options only, checked per argument, no shell |
+| `scripts/chart.py` | Draw a PNG read-only: a PromQL range query from the metrics backend, or a nagiosgraph graph through the signed graph proxy (ADR 0027) |
+| `scripts/share.py` | Hand an image to the chat gateway, which posts it to the conversation it came from: checked by content, size and location (ADR 0027) |
 | `scripts/redact.py` | Secret detection and redaction, shared by the validator and the audit log |
 | `scripts/check_identifiers.py` | Scans for site identifiers that must not ship in the plugin |
 | `gateway/` | The chat-ops gateway: Slack Socket Mode, approval requests, sessions per incident, unattended triage ([gateway/README.md](gateway/README.md)) |

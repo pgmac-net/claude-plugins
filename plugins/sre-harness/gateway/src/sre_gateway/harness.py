@@ -27,6 +27,7 @@ import audit  # noqa: E402
 import audit_hook  # noqa: E402
 import chat_policy  # noqa: E402
 import redact  # noqa: E402
+import share  # noqa: E402
 import sre_common  # noqa: E402
 import tool_policy  # noqa: E402
 import validate_site  # noqa: E402
@@ -39,6 +40,7 @@ __all__ = [
     "audit_hook",
     "chat_policy",
     "redact",
+    "share",
     "sre_common",
     "tool_policy",
     "validate_site",
@@ -46,6 +48,8 @@ __all__ = [
 
 INCIDENT_CALL = re.compile(r"(?:^|\s)\S*/scripts/incident\.py\s+(open|attach|close|promote|dismiss)\b")
 RESULT_LINE = re.compile(r'^\{"id":.*\}$', re.MULTILINE)
+SHARE_CALL = re.compile(r"(?:^|\s)\S*/scripts/share\.py\s")
+SHARE_LINE = re.compile(r'^\{.*"shared": "([0-9a-f]{64})".*\}$', re.MULTILINE)
 
 
 def incident_call(command: str) -> str | None:
@@ -75,6 +79,25 @@ def opened_incident(output: str) -> dict[str, Any] | None:
         if state.get("url") == url:
             return state
     return None
+
+
+def share_call(command: str) -> bool:
+    """Whether a shell command runs share.py (ADR 0027)."""
+    return bool(SHARE_CALL.search(command))
+
+
+def shared_images(output: str) -> list[dict[str, Any]]:
+    """The images a share.py run spooled, confirmed against local state.
+
+    The output only names a digest. The image must be in the spool, still be the type recorded and still hash
+    to that digest (share.load_spooled), so nothing the agent prints can point the gateway at another file.
+    """
+    found = []
+    for digest in dict.fromkeys(SHARE_LINE.findall(output)):
+        spooled = share.load_spooled(digest)
+        if spooled is not None:
+            found.append(spooled)
+    return found
 
 
 def outbound_secrets(extra: dict[str, str] | None = None, names: list[str] | None = None) -> dict[str, str]:

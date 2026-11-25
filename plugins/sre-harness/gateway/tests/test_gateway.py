@@ -60,6 +60,7 @@ def make(state, script, log, **overrides):
         state_dir=state / "gateway",
         question_idle_seconds=overrides.pop("question_idle", 600),
         attachments=overrides.pop("attachments", Limits()),
+        evidence_dir=overrides.pop("evidence_dir", None),
     )
     chat, tracker = overrides.pop("chat", FakeChat()), overrides.pop("tracker", FakeTracker())
     records = []

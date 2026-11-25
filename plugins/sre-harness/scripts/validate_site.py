@@ -82,10 +82,21 @@ def check_references(doc: dict[str, Any]) -> list[str]:
             f"audit/repo: '{audit_alias}' is not private; audit logs record every command "
             "and must not be written to a public repository"
         )
-    names = [source.get("name") for source in doc.get("monitoring", [])]
-    for name, count in Counter(names).items():
-        if count > 1:
-            errors.append(f"monitoring: source name '{name}' is used {count} times")
+    return errors + _monitoring_problems(doc.get("monitoring", []))
+
+
+def _monitoring_problems(sources: list[dict[str, Any]]) -> list[str]:
+    """Source names are unique, and only a nagios source has a graph proxy (chart.py nagios)."""
+    errors = [
+        f"monitoring: source name '{name}' is used {count} times"
+        for name, count in Counter(source.get("name") for source in sources).items()
+        if count > 1
+    ]
+    errors += [
+        f"monitoring/{index}/graph_proxy: only a nagios source has a graph proxy"
+        for index, source in enumerate(sources)
+        if source.get("graph_proxy") and source.get("type") != "nagios"
+    ]
     return errors
 
 

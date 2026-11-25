@@ -12,7 +12,8 @@ import srectl
 
 SCRIPTS = Path(srectl.__file__).resolve().parent
 # Scripts that are plumbing, not commands a person runs: srectl does not list them.
-HIDDEN = {"audit_hook.py", "kube_read.py", "check_identifiers.py"}
+# share.py only means something under the chat gateway; chart.py is the agent's graph tool (ADR 0027).
+HIDDEN = {"audit_hook.py", "kube_read.py", "check_identifiers.py", "share.py", "chart.py"}
 
 
 @pytest.fixture

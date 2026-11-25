@@ -31,7 +31,7 @@ With no tracking issue, extract from the conversation alone and say so in the do
 
 ## The steps
 
-1. **Extract** metadata (dates, duration, severity, resolution, impact, affected services as catalog names for the `services:` front-matter line), the timeline, one to four root-cause chains, and action items. Collect evidence gathered during the incident; if the site's `evidence` procedures can still produce something that proves cause or recovery, produce it now, before it expires.
+1. **Extract** metadata (dates, duration, severity, resolution, impact, affected services as catalog names for the `services:` front-matter line), the timeline, one to four root-cause chains, and action items. Collect evidence gathered during the incident, including images the agent shared in chat (`<evidence_dir>/<incident id>/shared-*`; the tracking issue lists each one); if the site's `evidence` procedures can still produce something that proves cause or recovery, produce it now, before it expires.
 2. **Root-cause** each chain with Infinite How's: `references/infinite-hows.md`.
    - **CAST, optional**: add a CAST section when the user asks. When the timeline shows an automated controller acting or failing to act (self-heal, watchdog, GitOps self-heal, scheduled job), offer it once. It reuses the service's STPA analysis and proposes anything new back to it: `references/cast.md`.
 3. **Name** the document by the site's convention.

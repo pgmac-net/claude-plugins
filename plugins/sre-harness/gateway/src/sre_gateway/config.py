@@ -96,6 +96,12 @@ class Config:
         return Limits.from_site(self.chat.get("attachments"))
 
     @property
+    def evidence_dir(self) -> Path | None:
+        """incident.evidence_dir, expanded: where copies of shared images go, one directory per incident."""
+        evidence = (self.doc.get("incident") or {}).get("evidence_dir")
+        return Path(evidence).expanduser() if evidence else None
+
+    @property
     def runner(self) -> dict[str, Any]:
         """The site's runner section; empty when it has none."""
         return self.doc.get("runner") or {}

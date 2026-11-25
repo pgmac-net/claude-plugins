@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 import audit_hook
+import image_files
 import redact
 import shell_mutations
 import sre_common
@@ -638,17 +639,43 @@ def _push_log(
             (tree / target).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(audit_hook.spool_path(state["id"]), tree / target)
             _git(tree, "add", str(target))
+            images = _add_images(tree, target, state["id"])
             message = f"audit: {state['id']} ({result['records']} records{', amended' if amend else ''})"
             message += f"\n\nhead: {result['head']}"
+            if images:
+                message += f"\nimages shown in chat: {images} (beside the log, named by sha256)"
             if earlier is not None:
                 before = target.parent / f"{earlier['id']}.jsonl"
                 shutil.copyfile(audit_hook.spool_path(earlier["id"]), tree / before)
                 _git(tree, "add", str(before))
+                _add_images(tree, before, earlier["id"])
                 message += f"\npromoted from: {earlier['id']} (committed beside it)"
             _git(tree, "commit", "--quiet", "-m", message)
             _git(tree, "push", "--quiet", "-u", "origin", branch)
         finally:
             _git(checkout, "worktree", "remove", "--force", str(tree))
+
+
+def _add_images(tree: Path, target: Path, incident_id: str) -> int:
+    """Commit the images the gateway posted for this incident beside its log, as <id>.images/<sha256>.<type>.
+
+    The record of what people were shown (ADR 0027). Only regular image files named by their own digest are
+    taken; anything else in the directory is left out.
+    """
+    source = image_files.incident_images_dir(incident_id)
+    if not source.is_dir() or source.is_symlink():
+        return 0
+    folder = target.parent / f"{incident_id}.images"
+    count = 0
+    for path in sorted(source.iterdir()):
+        data = image_files.named_by_content(path)
+        if data is None:
+            continue
+        (tree / folder).mkdir(parents=True, exist_ok=True)
+        (tree / folder / path.name).write_bytes(data)
+        _git(tree, "add", str(folder / path.name))
+        count += 1
+    return count
 
 
 def _already_committed(
