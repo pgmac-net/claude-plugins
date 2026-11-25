@@ -123,6 +123,21 @@ class FakeResponse(io.BytesIO):
         return False
 
 
+def test_the_graph_fetch_does_not_send_pythons_user_agent(monkeypatch: pytest.MonkeyPatch):
+    """Cloudflare answers 403 to 'Python-urllib/x.y' in front of the status page (found on the first deploy)."""
+    seen: dict[str, Any] = {}
+
+    def fake_open(request, timeout):
+        seen["agent"] = request.get_header("User-agent")
+        seen["timeout"] = timeout
+        return FakeResponse(png(600, 225))
+
+    monkeypatch.setattr(chart.slo._OPENER, "open", fake_open)  # pylint: disable=protected-access
+    assert chart.fetch_graph("https://status.example.com/api/graph?x=1") == png(600, 225)
+    assert seen["agent"] == chart.USER_AGENT
+    assert "python" not in seen["agent"].lower()
+
+
 def test_prom_queries_the_range_and_draws_a_png(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     pytest.importorskip("matplotlib")
     seen: dict[str, Any] = {}
