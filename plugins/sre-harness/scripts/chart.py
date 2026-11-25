@@ -55,6 +55,8 @@ MAX_SERIES = 20
 PERIODS = ("day", "week", "month", "quarter", "year")
 GRAPH_TTL = 300
 FETCH_TIMEOUT = 20
+# Cloudflare in front of the status page answers 403 to Python's default 'Python-urllib/x.y'.
+USER_AGENT = "sre-harness-chart/1"
 MAX_GRAPH_BYTES = 2 * 1024 * 1024
 EMPTY_GRAPH_HEIGHT = 50  # nagiosgraph's "No data available" PNG is 23 pixels tall
 DURATION = re.compile(r"^(\d{1,4})([smhd])$")
@@ -245,7 +247,7 @@ def png_height(data: bytes) -> int:
 
 
 def fetch_graph(url: str) -> bytes:
-    request = urllib.request.Request(url)  # noqa: S310 - https, from site configuration
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})  # noqa: S310 - https, site config
     try:
         with slo._OPENER.open(request, timeout=FETCH_TIMEOUT) as response:  # pylint: disable=protected-access
             data = response.read(MAX_GRAPH_BYTES + 1)
