@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sre_gateway.agent import AskPermission, Event, PermissionAnswer, TurnEnd
-from sre_gateway.chat import ApprovalView, FileRef, FileUnavailable, NameTaken, Place, Posted
+from sre_gateway.chat import ApprovalView, FileRef, FileUnavailable, NameTaken, Place, Posted, UploadRefused
 from sre_gateway.indicator import NAME
 
 INDICATOR_PREFIX = f"{NAME} is "
@@ -132,6 +132,17 @@ class FakeChat:  # pylint: disable=too-many-instance-attributes
         if file.id in self.unavailable:
             raise FileUnavailable(self.unavailable[file.id])
         return self.files[file.id][: max_bytes + 1]
+
+    # Images posted: (place, filename, title, bytes); refuse_upload makes the platform say no.
+    uploads: list[tuple[Place, str, str, bytes]] = field(default_factory=list)
+    refuse_upload: str | None = None
+
+    async def upload(self, place: Place, data: bytes, filename: str, title: str) -> str | None:
+        if self.refuse_upload:
+            raise UploadRefused(self.refuse_upload)
+        self.uploads.append((place, filename, title, data))
+        self.timeline.append(("upload", title, place))
+        return f"https://chat.example.com/files/{filename}"
 
     def texts(self) -> list[str]:
         return [text for _place, text in self.posts]

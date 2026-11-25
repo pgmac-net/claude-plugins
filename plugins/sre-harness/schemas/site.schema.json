@@ -214,6 +214,20 @@
             }
           }
         },
+        "images": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Images the agent shares into chat with share.py (PNG, JPEG, GIF or WebP, checked by content). Images are not redacted. Every key is optional.",
+          "properties": {
+            "max_mb": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 5,
+              "description": "The largest image that may be shared."
+            }
+          }
+        },
         "question_idle_minutes": {
           "type": "integer",
           "minimum": 1,
@@ -732,6 +746,27 @@
         "mcp_server": {
           "type": "string",
           "description": "Name of the MCP server that fronts this source, if any."
+        },
+        "graph_proxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url",
+            "key_file"
+          ],
+          "description": "Nagios only: a signed graph proxy that serves nagiosgraph PNGs (chart.py nagios). Requests are signed with HMAC-SHA256 over 'host|service|period|timet|expires'.",
+          "properties": {
+            "url": {
+              "type": "string",
+              "pattern": "^https://[^\\s/@?#]+(/[^\\s?#]*)?$",
+              "description": "Base URL of the proxy; /api/graph is appended. https only."
+            },
+            "key_file": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "description": "File name, in ~/.config/sre-harness, holding the signing secret (mode 600). A name, never the secret."
+            }
+          }
         },
         "credentials_env": {
           "type": "array",

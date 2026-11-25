@@ -24,6 +24,7 @@ from sre_gateway.chat import (
     NameTaken,
     Place,
     Posted,
+    UploadRefused,
 )
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,11 @@ TYPING = "is writing…"  # Slack puts the app's name in front.
 FILE_SHARE = "file_share"
 DOWNLOAD_SECONDS = 30
 NO_ACCESS = "Slack would not give the file to the app (does the app have the files:read scope?)"
+UPLOAD_REFUSALS = {
+    "missing_scope": "Slack refused the upload: the app needs the files:write scope (reinstall it from the manifest)",
+    "not_in_channel": "Slack refused the upload: the app is not in this channel",
+    "file_uploads_disabled": "Slack refused the upload: file uploads are turned off in this workspace",
+}
 
 
 def file_refs(event: dict[str, Any]) -> tuple[FileRef, ...]:
@@ -468,6 +474,29 @@ class SlackAdapter:
                     if len(data) > max_bytes:
                         raise FileUnavailable("the file is larger than the download limit")
         return bytes(data)
+
+    async def upload(self, place: Place, data: bytes, filename: str, title: str) -> str | None:
+        """An image into the conversation, via files.getUploadURLExternal and files.completeUploadExternal.
+
+        The only upload Slack still offers, free plan included; it needs the files:write scope. The caption is
+        escaped like any agent text, so it cannot mention or link.
+        """
+        try:
+            reply = await self._client.files_upload_v2(
+                channel=place.channel,
+                thread_ts=place.thread,
+                file=data,
+                filename=filename,
+                title=title,
+                alt_txt=title[:1000],
+                initial_comment=escape(title),
+            )
+        except SlackApiError as exc:
+            reason = str(exc.response.get("error"))
+            raise UploadRefused(UPLOAD_REFUSALS.get(reason, f"Slack refused the upload ({reason})")) from exc
+        files = reply.get("files") or [reply.get("file") or {}]
+        first = files[0] if files and isinstance(files[0], dict) else {}
+        return first.get("permalink")
 
     async def stop(self) -> None:
         if self._socket is not None:

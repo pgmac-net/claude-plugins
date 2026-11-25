@@ -3,13 +3,14 @@
 A question has no incident, so the audit hook records nothing for it, and Pi
 has no hook at all. The gateway sees every tool call and its output, so it
 keeps the record itself: who asked, what, each call (input redacted, output as
-size and hash only) and each refusal. One chained JSON-lines file per
+size and hash only), each refusal and each image it posted. One chained JSON-lines file per
 question, readable only by the gateway's user, kept for RETENTION_DAYS and
 never committed (ADR 0022).
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -98,6 +99,10 @@ class QuestionLog:
             tool_use_id=tool_use_id[:128],
         )
 
+    def shared(self, sha256: str, kind: str, size: int, title: str) -> None:
+        """An image the agent posted; its copy is kept beside the log, as <id>.images/<sha256>.<type>."""
+        self._append("shared", image={"sha256": sha256, "type": kind, "bytes": size}, title=self._text(title))
+
     def ended(self, reason: str) -> None:
         self._append("ended", reason=reason)
 
@@ -125,4 +130,16 @@ def prune(directory: Path, days: int = RETENTION_DAYS, now: float | None = None)
                 removed += 1
         except OSError:
             log.exception("could not prune %s", path.name)
+    # Images a question posted go with its log, a day at most behind it.
+    for images in directory.glob("q-*.images"):
+        if images.is_symlink() or not images.is_dir():
+            continue
+        for path in images.iterdir():
+            try:
+                if path.is_file() and not path.is_symlink() and path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                log.exception("could not prune %s", path.name)
+        with contextlib.suppress(OSError):
+            images.rmdir()
     return removed

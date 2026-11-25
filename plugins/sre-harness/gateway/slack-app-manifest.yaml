@@ -32,6 +32,7 @@ oauth_config:
       - channels:history    # read the hub channel, if it is public
       - users:read          # show approvers' names
       - files:read          # read a snippet or text file a responder attaches (chat.attachments in site.yaml)
+      - files:write         # post an image the agent shares with share.py (chat.images in site.yaml)
 settings:
   event_subscriptions:
     bot_events:

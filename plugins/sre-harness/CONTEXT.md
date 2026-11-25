@@ -266,6 +266,14 @@ _Avoid_: Read-only mode (that is the triage-only policy's avoided name too), Q&A
 A snippet or text file a responder sends with a chat message, read by the gateway within the site's size limits, redacted and given to the agent as untrusted data; the tracking issue gets a description of it, never its content.
 _Avoid_: Upload, paste, file share (that is Slack's name for the message subtype)
 
+**Shared image**:
+An image the agent hands to the chat gateway with `share.py`, checked by content and posted only to its own conversation; it is never redacted, the tracking issue gets a description of it, and for an incident a copy is kept with the evidence and committed beside the audit log.
+_Avoid_: Attachment (that comes from a person), upload, screenshot
+
+**Chart**:
+A PNG `chart.py` draws read-only from the site's metrics backend or the nagiosgraph proxy, written under the evidence or temp directory; it reaches chat only as a shared image.
+_Avoid_: Graph render, panel, dashboard (those are Grafana's)
+
 **Link allowlist**:
 The hosts in `chat.link_hosts` whose links stay clickable in the agent's chat replies; any other link is shown as its address in code, and with no list nothing is clickable.
 _Avoid_: Domain filter, URL whitelist

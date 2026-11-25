@@ -160,6 +160,7 @@ def build(config: Config) -> Gateway:
         state_dir=config.state_dir,
         question_idle_seconds=config.question_idle_seconds,
         attachments=config.attachments,
+        evidence_dir=config.evidence_dir,
     )
     return Gateway(
         settings,

@@ -105,6 +105,18 @@ refused call or look for another way to make the same change; say what you could
 - Never print a secret, token or credential, and never try to read one.
 """
 
+IMAGES_APPEND = """
+Graphs, when one would show the point better than numbers:
+- Draw: `uv run {scripts}/chart.py prom '<promql>' --since 6h --title "<what>" -o <file>.png`, or \
+`uv run {scripts}/chart.py nagios <host> '<service exactly as Nagios names it>' --period day -o <file>.png`. \
+The file goes under the evidence directory (`<evidence dir>/<incident id>/` once there is a record) or the \
+system temp directory; nowhere else is allowed. Exit 3 means no data: say so rather than draw something else.
+- Look at it with Read before you describe or post it.
+- Post: `uv run {scripts}/share.py <file> --title "<host, metric and window>"`. The gateway puts it in this \
+conversation. Any PNG, JPEG, GIF or WebP you made can be posted (a sargraph needs `-o <file>.png`; SVG is not \
+taken). Images are not redacted: never post an image that shows a secret.
+"""
+
 QUESTION_MESSAGE = """\
 [chat] {name} asks: {text}
 
@@ -112,9 +124,10 @@ Answer this question read-only. It is not an incident: open no record."""
 
 
 def system_append(scripts: str, triage: bool = False, question: bool = False) -> str:
+    images = IMAGES_APPEND.format(scripts=scripts)
     if question:
-        return QUESTION_APPEND.format(scripts=scripts)
-    text = SYSTEM_APPEND.format(scripts=scripts)
+        return QUESTION_APPEND.format(scripts=scripts) + images
+    text = SYSTEM_APPEND.format(scripts=scripts) + images
     return text + TRIAGE_APPEND.format(scripts=scripts) if triage else text
 
 
