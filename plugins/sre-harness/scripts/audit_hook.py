@@ -238,8 +238,14 @@ def head(incident_id: str) -> tuple[int, str] | None:
     return len(lines), hashlib.sha256(lines[-1].encode()).hexdigest()
 
 
+def retired_path(incident_id: str) -> Path:
+    """The tombstone gc leaves for an incident whose committed log it proved preserved (homelabia#281)."""
+    return state_dir() / "retired" / f"{incident_id}.json"
+
+
 def is_closed(incident_id: str) -> bool:
-    return (state_dir() / "audit" / f"{incident_id}.closed").exists()
+    """Whether the incident's log is committed: closed by commit, or retired by gc. Nothing more is recorded."""
+    return (state_dir() / "audit" / f"{incident_id}.closed").exists() or retired_path(incident_id).exists()
 
 
 def handle(payload: dict[str, Any]) -> None:

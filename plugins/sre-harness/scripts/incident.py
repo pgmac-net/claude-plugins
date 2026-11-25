@@ -315,6 +315,35 @@ def cmd_open(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     return 0
 
 
+def lift_closure(incident_id: str, doc: dict[str, Any], site_root: Path) -> dict[str, Any]:
+    """Let a committed incident take records again, continuing its committed chain (homelabia#281).
+
+    A spool that gc already cleared is restored byte for byte from the audit repository's default
+    branch first, so the next record chains to the committed head and a later commit only appends.
+    Returns the length and head of the log being continued.
+    """
+    spool = audit_hook.spool_path(incident_id)
+    if spool.is_file() and not spool.with_suffix(".closed").exists():
+        # Retired, yet a spool is here: one started after commit, not the committed log. Never build on it.
+        raise SiteError(
+            f"{incident_id} has a local spool started after its log was committed; a person drops it first with "
+            f"incident.py gc --incident {incident_id} --discard-spool"
+        )
+    if not spool.is_file():
+        merged, where = state_gc.merged_log(incident_id, doc, site_root)
+        if merged is None:
+            raise SiteError(
+                f"{incident_id} is committed but its log could not be read from the audit repository ({where}); "
+                "not reopening, so the next record cannot start a new chain"
+            )
+        spool.parent.mkdir(parents=True, exist_ok=True)
+        spool.write_bytes(merged)
+    head = audit_hook.head(incident_id)
+    spool.with_suffix(".closed").unlink(missing_ok=True)
+    audit_hook.retired_path(incident_id).unlink(missing_ok=True)
+    return {"records": head[0] if head else 0, "head": head[1] if head else audit_hook.GENESIS}
+
+
 def cmd_attach(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     repo, number = split_incident_id(args.incident, doc)
     issue = json.loads(
@@ -347,8 +376,17 @@ def cmd_attach(args: argparse.Namespace, doc: dict[str, Any]) -> int:
         else:
             print(f"{args.incident} is resolved but its body has no Resolved time; none recorded.", file=sys.stderr)
     resolved = state.get("status") == "resolved"
-    if resolved and args.reopen:
+    if resolved and not args.reopen and known is None and not audit_hook.is_closed(args.incident):
+        # Cleared by a gc that left no tombstone (before homelabia#281): a merged log means it is committed.
+        merged, _where = state_gc.merged_log(args.incident, doc, args.site_root)
+        if merged is not None:
+            state_gc.retire(args.incident, merged, "attach")
+    continued = None
+    if args.reopen:
         sre_common.check_triage_write(state)
+        if audit_hook.is_closed(args.incident):
+            continued = lift_closure(args.incident, doc, args.site_root)
+    if resolved and args.reopen:
         state["status"] = "open"
         state.pop("resolved_at", None)
     # A resolved incident whose audit log is committed has nothing left to capture into: a bind token or an
@@ -358,6 +396,8 @@ def cmd_attach(args: argparse.Namespace, doc: dict[str, Any]) -> int:
         start_capture(state, doc)
         token = state.pop("bind")
     sre_common.write_incident_state(state)
+    if continued is not None:
+        audit_hook.self_report(args.incident, "reopened", continues=continued)
     if resolved and args.reopen:
         import timeline  # noqa: PLC0415  pylint: disable=import-outside-toplevel
 
@@ -563,6 +603,8 @@ def cmd_gc(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     policy = state_gc.Policy(
         require_issue_closed=not args.ignore_issue_state, fetch=not args.no_fetch, token_days=args.token_days
     )
+    if args.discard_spool:
+        return discard_spool(args, doc, policy)
     result = state_gc.run(doc, args.site_root, policy, apply=args.apply, only=args.only)
     if args.quiet:
         return 0
@@ -570,6 +612,26 @@ def cmd_gc(args: argparse.Namespace, doc: dict[str, Any]) -> int:
     if result["dry_run"] and result["cleared"]:
         print("Dry run: nothing was deleted. Run again with --apply to delete.", file=sys.stderr)
     return 0
+
+
+def discard_spool(args: argparse.Namespace, doc: dict[str, Any], policy: state_gc.Policy) -> int:
+    """gc --discard-spool: a person drops a spool started after the incident's log was committed (homelabia#281)."""
+    if sre_common.from_chat():
+        # Only a person may decide that records are not kept; a chat session never can.
+        raise SiteError("--discard-spool drops audit records and is not allowed from chat")
+    if not args.only or len(args.only) != 1:
+        raise SiteError("--discard-spool needs exactly one --incident: it never sweeps")
+    result = state_gc.discard_spool(args.only[0], doc, args.site_root, policy, apply=args.apply)
+    if not args.quiet:
+        print(json.dumps(result, indent=2))
+        if result.get("reason"):
+            print(f"Not discarded: {result['reason']}", file=sys.stderr)
+        elif result["dry_run"]:
+            print(
+                f"Dry run: {len(result['drop'])} record(s) above would be dropped. Run again with --apply to drop.",
+                file=sys.stderr,
+            )
+    return 0 if not result.get("reason") else 1
 
 
 def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915  pylint: disable=too-many-statements
@@ -635,6 +697,11 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915  pylint: disable
     gc.add_argument("--no-fetch", action="store_true", help="do not fetch the audit repository first")
     gc.add_argument("--ignore-issue-state", action="store_true", help="do not require the tracking issue to be closed")
     gc.add_argument("--token-days", type=int, default=7, help="age at which an unused bind token is removed")
+    gc.add_argument(
+        "--discard-spool",
+        action="store_true",
+        help="a person drops a spool started after the incident's log was committed and merged (one --incident)",
+    )
     gc.add_argument("--quiet", action="store_true", help="print nothing")
     gc.set_defaults(run=cmd_gc)
 

@@ -299,6 +299,14 @@
             },
             {
               "flags": [
+                "--discard-spool"
+              ],
+              "value": false,
+              "choices": null,
+              "help": "a person drops a spool started after the incident's log was committed and merged (one --incident)"
+            },
+            {
+              "flags": [
                 "--quiet"
               ],
               "value": false,
