@@ -130,6 +130,14 @@ An incident is cleared only when all of these hold:
 
 An incident whose log was never committed is the only copy of its record: it is reported and never deleted. Deletion is never recursive, never follows a symlink, and only touches files whose names are incident ids inside the state directory. Unused bind tokens older than a week are removed too.
 
+A cleared incident leaves a tombstone, `retired/<id>.json`, so it stays committed: nothing records into it again until `incident.py attach <id> --reopen`, which restores the committed log from the audit repository and continues it. `audit.py commit` only ever extends a log already on the default branch, `--offline` included. A spool started after commit by an earlier version is dropped by a person, after a dry run that lists every record it would drop:
+
+```bash
+uv run scripts/incident.py gc --incident <id> --discard-spool [--apply]
+```
+
+See [ADR 0028](docs/adr/0028-a-committed-audit-log-stays-committed-and-is-only-ever-extended.md).
+
 Three triggers, all optional and all safe to miss:
 
 - **At `incident.py open`**: quiet, no network, never fails the open.

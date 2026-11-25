@@ -332,9 +332,15 @@ def leftover_secrets(entries: list[tuple[str, dict[str, Any]]]) -> list[dict[str
 def check_anchors(
     state: dict[str, Any], entries: list[tuple[str, dict[str, Any]]], responders: list[str] | None
 ) -> dict[str, Any]:
-    """Compare the log with the head hashes pinned in the incident's timeline comments."""
+    """Compare the log with the head hashes pinned in the incident's timeline comments.
+
+    A log whose first record is a genesis record written after a pin cannot hold the records that pin
+    names: it is a new chain started later (a re-spool after commit, homelabia#281), not a damaged copy
+    of the pinned one. That mismatch is marked 'new_chain' and says so.
+    """
     mismatches = []
     checked = 0
+    started = _chain_start(entries)
     for entry in timeline.fetch(state, responders):
         pin = entry.get("audit_anchor")
         if not pin:
@@ -343,15 +349,42 @@ def check_anchors(
         count = pin["records"]
         if count > len(entries):
             problem = f"timeline pinned {count} records; the log has {len(entries)}"
-            mismatches.append({"at": entry["at"], "problem": problem})
         elif hashlib.sha256(entries[count - 1][0].encode()).hexdigest() != pin["head"]:
-            mismatches.append({"at": entry["at"], "problem": f"record {count} is not the one pinned in the timeline"})
+            problem = f"record {count} is not the one pinned in the timeline"
+        else:
+            continue
+        if started is not None and started > sre_common.parse_utc(entry["at"]):
+            problem = (
+                f"a new chain started at {sre_common.iso_utc(started)} ({len(entries)} records), after the timeline "
+                f"pinned {count} records at {entry['at']}: this log is not the one that was pinned"
+            )
+            mismatches.append({"at": entry["at"], "problem": problem, "new_chain": True})
+        else:
+            mismatches.append({"at": entry["at"], "problem": problem})
     return {"anchors_checked": checked, "anchor_mismatches": mismatches}
+
+
+def _chain_start(entries: list[tuple[str, dict[str, Any]]]) -> datetime | None:
+    """When a log's chain began: its first record's time, if that record is a genesis record."""
+    if not entries or entries[0][1].get("prev") != audit_hook.GENESIS:
+        return None
+    try:
+        return sre_common.parse_utc(str(entries[0][1].get("ts")))
+    except ValueError:
+        return None
+
+
+def closed_message(incident_id: str) -> str:
+    """Why nothing more is recorded for a committed incident, and what to do instead."""
+    return (
+        f"the audit log for {incident_id} is committed and closed; to record more, reopen it: "
+        f"incident.py attach {incident_id} --reopen"
+    )
 
 
 def cmd_record(args: argparse.Namespace, state: dict[str, Any], _doc: dict[str, Any], _root: Path) -> int:
     if audit_hook.is_closed(state["id"]):
-        raise SiteError(f"the audit log for {state['id']} is committed and closed")
+        raise SiteError(closed_message(state["id"]))
     env_values = redact.env_secrets(extra_names=state.get("redact_env", []))
     record: dict[str, Any] = {
         "v": 1,
@@ -413,7 +446,7 @@ def record_chat_decision(incident_id: str, decision: ChatDecision) -> dict[str, 
     if decision.outcome == "refused" and decision.approver:
         raise ValueError("a refusal by policy names no approver")
     if audit_hook.is_closed(incident_id):
-        raise SiteError(f"the audit log for {incident_id} is committed and closed")
+        raise SiteError(closed_message(incident_id))
     env_values = redact.env_secrets(extra_names=audit_hook.credential_names(incident_id))
     redacted = redact.redact(decision.tool_input, env_values)
     exact = json.dumps(decision.tool_input, sort_keys=True, ensure_ascii=False, default=str)
@@ -463,7 +496,7 @@ def record_policy_change(change: PolicyChange) -> None:
     if (change.old, change.new) != POLICIES:
         raise ValueError(f"the only policy change is {POLICIES[0]} to {POLICIES[1]}; a session never goes back")
     if audit_hook.is_closed(change.incident):
-        raise SiteError(f"the audit log for {change.incident} is committed and closed")
+        raise SiteError(closed_message(change.incident))
     audit_hook.append(
         change.incident,
         {
@@ -545,7 +578,17 @@ def _commit_ready(state: dict[str, Any], doc: dict[str, Any], offline: bool) -> 
         )
     if not offline:
         pinned = check_anchors(state, entries, doc["incident"].get("responders"))
-        if pinned["anchor_mismatches"]:
+        mismatches = pinned["anchor_mismatches"]
+        if mismatches and all(item.get("new_chain") for item in mismatches):
+            raise SiteError(
+                f"{incident_id}: {mismatches[0]['problem']}. This spool began after the pin, so it is not a damaged "
+                "copy of the pinned log: that log is usually already committed on the audit repository's default "
+                "branch. Not committing this spool. A person can drop it, after that log is checked against "
+                "the pins, with "
+                f"incident.py gc --incident {incident_id} --discard-spool, or reopen with "
+                f"incident.py attach {incident_id} --reopen to continue the committed log"
+            )
+        if mismatches:
             raise SiteError(
                 f"{incident_id}: the log does not match {len(pinned['anchor_mismatches'])} head hash(es) pinned in "
                 "the timeline; not committing. Run audit.py verify --check-anchors"
@@ -693,9 +736,18 @@ def _already_committed(
     """
     remote_head, branch, target = where
     state, earlier = states
-    if _git_show(checkout, remote_head, target) == spool:
+    merged = _git_show(checkout, remote_head, target)
+    if merged == spool:
         _release_all(state, earlier)
         return {"status": "preserved", "pull_request": "", "note": f"already on {remote_head}; nothing to do"}
+    if merged is not None and not spool.startswith(merged):
+        # An audit record on the default branch is only ever extended, never replaced (homelabia#281).
+        raise SiteError(
+            f"{state['id']}: {target} on {remote_head} holds {len(merged.splitlines())} records that this spool "
+            f"({len(spool.splitlines())} records) does not start with; not overwriting an audit record. "
+            f"A spool started after the log was committed can be dropped by a person with "
+            f"incident.py gc --incident {state['id']} --discard-spool"
+        )
     pushed = _git_show(checkout, f"origin/{branch}", target)
     if pushed is None:
         return None

@@ -303,7 +303,7 @@ class TestVerify:
         assert result["broken_at_lines"]
 
 
-class TestAuditCli:
+class TestAuditCli:  # pylint: disable=too-many-public-methods
     @pytest.fixture
     def incident(self, state, site, monkeypatch):
         monkeypatch.setenv("SRE_HARNESS_SITE", str(site))
@@ -429,6 +429,62 @@ class TestAuditCli:
         again = self.committed(capsys)
         assert again["status"] == "preserved" and "nothing to do" in again["note"]
 
+    @staticmethod
+    def merge_and_drop_branch(remote: Path, incident: Path) -> None:
+        """The audit pull request merged and its branch deleted, as GitHub leaves it."""
+        subprocess.run(
+            ["git", "-C", str(remote), "update-ref", "refs/heads/main", "refs/heads/audit/catalog-5"], check=True
+        )
+        subprocess.run(["git", "-C", str(remote), "branch", "-D", "audit/catalog-5"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(incident), "fetch", "--quiet", "--prune", "origin"], check=True)
+
+    def test_a_new_chain_never_overwrites_the_merged_log_even_offline(self, remote, incident, capsys):
+        """catalog-28 / #68: a re-spool committed --offline would have replaced main's log."""
+        self.committed(capsys)
+        self.merge_and_drop_branch(remote, incident)
+        merged = self.on(remote, "main")
+        path = audit_hook.spool_path("catalog-5")
+        path.unlink()
+        audit_hook.append("catalog-5", {"v": 1, "ts": "2026-11-21T00:00:00Z", "incident": "catalog-5", "event": "x"})
+        audit_hook.spool_path("catalog-5").with_suffix(".closed").unlink()
+        assert audit.main(["commit", "--no-pr", "--offline"]) == 2
+        err = capsys.readouterr().err
+        assert "not overwriting an audit record" in err and "--discard-spool" in err
+        assert self.on(remote, "main") == merged
+        assert not audit_hook.is_closed("catalog-5")
+
+    def test_a_continued_log_commits_as_an_append(self, remote, incident, capsys):
+        self.committed(capsys)
+        self.merge_and_drop_branch(remote, incident)
+        merged = self.on(remote, "main")
+        audit_hook.spool_path("catalog-5").with_suffix(".closed").unlink()
+        audit_hook.append("catalog-5", {"v": 1, "ts": "2026-11-21T00:00:00Z", "incident": "catalog-5", "event": "x"})
+        assert self.committed(capsys)["status"] == "committed"
+        pushed = self.on(remote, "audit/catalog-5")
+        assert pushed.startswith(merged) and len(pushed.splitlines()) == len(merged.splitlines()) + 1
+
+    @pytest.mark.usefixtures("remote")
+    def test_a_spool_started_after_the_pin_says_new_chain_not_lost_records(self, monkeypatch, capsys):
+        path = audit_hook.spool_path("catalog-5")
+        path.unlink()
+        audit_hook.append("catalog-5", {"v": 1, "ts": "2026-11-21T00:00:00Z", "incident": "catalog-5", "event": "x"})
+        pinned = [{"type": "action", "at": "2026-11-20T00:00:00Z", "audit_anchor": {"records": 53, "head": "a" * 64}}]
+        monkeypatch.setattr(audit.timeline, "fetch", lambda _state, _responders=None: pinned)
+        assert audit.main(["commit", "--no-pr"]) == 2
+        err = capsys.readouterr().err
+        assert "a new chain started at 2026-11-21T00:00:00Z (1 records)" in err
+        assert "after the timeline pinned 53 records at 2026-11-20T00:00:00Z" in err
+        assert "does not match" not in err and "--discard-spool" in err
+
+    @pytest.mark.usefixtures("remote")
+    def test_a_damaged_log_keeps_the_plain_mismatch_wording(self, monkeypatch, capsys):
+        first_ts = log("catalog-5")[0]["ts"]
+        pinned = [{"type": "action", "at": first_ts, "audit_anchor": {"records": 1, "head": "a" * 64}}]
+        monkeypatch.setattr(audit.timeline, "fetch", lambda _state, _responders=None: pinned)
+        assert audit.main(["commit", "--no-pr"]) == 2
+        err = capsys.readouterr().err
+        assert "does not match 1 head hash(es)" in err and "new chain" not in err
+
     @pytest.mark.usefixtures("remote")
     def test_offline_is_refused_from_chat_and_takes_no_abbreviation(self, monkeypatch, capsys):
         with pytest.raises(SystemExit):
@@ -509,7 +565,8 @@ class TestHardening:
         open_incident()
         audit_hook.handle(call("PreToolUse", tool_input={"command": "kubectl delete pod x"}))
         count, head = audit_hook.head("incidents-7")
-        pinned = [{"type": "action", "at": "2026-01-02T03:04:05Z", "audit_anchor": {"records": count, "head": head}}]
+        pinned_at = audit.read_log("incidents-7")[-1][1]["ts"]
+        pinned = [{"type": "action", "at": pinned_at, "audit_anchor": {"records": count, "head": head}}]
         monkeypatch.setattr(audit.timeline, "fetch", lambda _state, _responders=None: pinned)
         state_doc = {"id": "incidents-7"}
         assert audit.check_anchors(state_doc, audit.read_log("incidents-7"), None) == {

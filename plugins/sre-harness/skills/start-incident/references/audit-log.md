@@ -68,6 +68,8 @@ It verifies the chain, compares the log with the hashes pinned in the timeline, 
 
 Running it again is safe. If the same log is already on the default branch it says `preserved`; if it is on the audit branch waiting for its pull request it says `pending`; either way it exits 0 and makes sure capture has stopped. If the log has changed since it was pushed, it refuses rather than overwrite an audit record; `--amend` pushes the new log to the same branch as a new commit, and is for a person to decide.
 
+A log already on the default branch is only ever **extended**: the spool must start with exactly the merged bytes (a reopened incident's continuation), or commit refuses with `not overwriting an audit record`. `--offline` does not skip this. When the spool's chain began after a pin in the timeline, the refusal says `a new chain started at <ts> … after the timeline pinned <n> records`: that is a spool started after the log was committed, not lost or tampered records. See "Afterwards: local state" for what to do with it.
+
 `audit.py commit` refuses an incident that is not resolved, because committing stops capture and the gateway then refuses every approval for that incident. Run `incident.py close --incident <id>` first. `--unresolved` overrides this and is for a person to decide.
 
 From the chat gateway, `audit.py commit` and `incident.py gc` run without an approval request, but `commit --offline`, `commit --unresolved` and `gc --ignore-issue-state` are refused. Once the log is committed, the gateway refuses any further approval request for that incident at once, because none could be recorded. If a decision cannot be written for any other reason, the refusal now says why (`Refused: the approval could not be recorded: <reason>`).
@@ -78,11 +80,24 @@ From the chat gateway, `audit.py commit` and `incident.py gc` run without an app
 
 Scripts called without `--incident` act on the machine's *current* incident, the one last opened or attached. Under the chat gateway every session shares that pointer, so the gateway sets `SRE_HARNESS_NO_CURRENT=1` and a call without `--incident` is refused. Pass it after the subcommand, e.g. `timeline.py add --incident <id> ...`, so the call still matches the allow-list. Writes print the incident they touched.
 
-`incident.py attach` to an incident that is already known keeps its local state and only refreshes what the issue says. A resolved incident stays resolved; `attach --reopen` reopens it and records that as a timeline decision. With no local state (cleared by `gc`, or another machine), an issue body whose Phase is `Resolved` is attached as resolved, with the resolved time taken from the body's `Resolved:` line. If its audit log is already committed, no capture starts: the output has `"bind": null` and no `active` marker is written.
+`incident.py attach` to an incident that is already known keeps its local state and only refreshes what the issue says. A resolved incident stays resolved; `attach --reopen` reopens it and records that as a timeline decision. With no local state (cleared by `gc`, or another machine), an issue body whose Phase is `Resolved` is attached as resolved, with the resolved time taken from the body's `Resolved:` line. If its audit log is already committed, no capture starts: the output has `"bind": null` and no `active` marker is written. That holds after `gc` too: a resolved incident with no local state whose log is on the audit repository's default branch is retired on attach.
+
+`attach --reopen` of a committed or retired incident continues its log: if `gc` already removed the spool, it is restored byte for byte from the audit repository's default branch, then a `reopened` record is added that names the committed length and head. A later `audit.py commit` appends to the merged log. If the committed log cannot be read, or a stray spool started after the commit is in the way, reopen refuses.
 
 ## Afterwards: local state
 
 `audit.py commit` leaves the local spool in place, because its pull request has not merged. Once the audit pull request is merged and the tracking issue is closed, `incident.py gc --apply` removes it, but only if the file on the audit repository's default branch is byte-identical to the local copy. Run `incident.py gc` (a dry run) to see what would go and why anything is kept. Never delete files under the state directory by hand: `verify` reports tool calls that touch it, and an uncommitted log is the only copy.
+
+`gc --apply` leaves one small file per cleared incident, `retired/<id>.json` (records, head, when). While it exists the incident counts as committed: the hook, `audit.py record` and the gateway record nothing more for it, and refusals point at `attach --reopen`. Only `attach --reopen` removes it.
+
+**A spool started after commit** (left over from before sre-harness 0.28.0, homelabia#281) is dropped only by a person:
+
+```bash
+uv run <plugin root>/scripts/incident.py gc --incident <id> --discard-spool          # dry run: lists every record it would drop
+uv run <plugin root>/scripts/incident.py gc --incident <id> --discard-spool --apply
+```
+
+It needs exactly one `--incident`, a resolved incident, and the committed log on the audit repository's default branch with an intact chain that matches every hash pinned in the timeline. It retires the incident and deletes its local state; the merged log is never touched. It is refused from chat. If the dropped records matter (real approvals), reopen instead and record them again in the continued log.
 
 ## Limits to state honestly
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -13,6 +14,7 @@ import incident
 import pytest
 import sre_common
 import state_gc
+import timeline
 import yaml
 
 
@@ -106,7 +108,7 @@ def test_a_merged_closed_incident_leaves_no_file_behind(world):
     result = run_gc(world)
 
     assert result["cleared"] == [incident_id] and result["kept"] == []
-    assert world.files() == set()
+    assert world.files() == {f"retired/{incident_id}.json"}, "only the tombstone stays (homelabia#281)"
 
 
 def test_the_merged_file_in_the_repository_is_never_touched(world):
@@ -210,6 +212,7 @@ class TestFilesAndPointers:
         run_gc(world)
         assert (world.state / "current").read_text().strip() == other
         (world.state / "current").write_text(done + "\n", encoding="utf-8")
+        audit_hook.retired_path(done).unlink()  # as attach --reopen would
         world.incident(7)
         run_gc(world)
         assert not (world.state / "current").exists()
@@ -334,7 +337,7 @@ class TestCommandLine:
         world.merge_audit(incident_id)
         world.issues[7] = "CLOSED"
         assert self.run(capsys, "--no-fetch", "--apply", "--quiet") == {}
-        assert world.files() == set()
+        assert world.files() == {f"retired/{incident_id}.json"}
 
     def test_ignore_issue_state_skips_only_the_issue_check(self, world, capsys):
         done, unmerged = world.incident(7), world.incident(8)
@@ -420,3 +423,291 @@ class TestAtIncidentStart:
         monkeypatch.setattr(state_gc, "run", boom)
         root, doc = sre_common.load_site(str(world.site))
         assert state_gc.auto_clean(doc, root) == 0
+
+
+# --- homelabia#281: a committed incident stays committed after gc ------------------------------------------------
+
+
+def cleared(world: World, number: int = 7) -> str:
+    """An incident committed, merged, closed and cleared by gc, as on macro after a normal close-out."""
+    incident_id = world.incident(number)
+    world.merge_audit(incident_id)
+    world.issues[number] = "CLOSED"
+    assert run_gc(world)["cleared"] == [incident_id]
+    return incident_id
+
+
+def bind_session(world: World, incident_id: str, session: str = "late") -> None:
+    """A session still pointing at the incident: a gateway conversation, or one bound again by hand."""
+    (world.state / "sessions").mkdir(parents=True, exist_ok=True)
+    (world.state / "sessions" / f"{session}.json").write_text(json.dumps({"incident": incident_id}), encoding="utf-8")
+
+
+def respool(incident_id: str, count: int = 2) -> None:
+    """What happened before the fix: a fresh chain started after gc, beside a resolved state file."""
+    audit_hook.retired_path(incident_id).unlink(missing_ok=True)
+    for index in range(count):
+        audit_hook.append(
+            incident_id,
+            {
+                "v": 1,
+                "ts": f"2026-11-21T00:00:0{index}Z",
+                "event": "approval",
+                "via": "chat",
+                "command": f"late {index}",
+            },
+        )
+    sre_common.write_incident_state(
+        {
+            "id": incident_id,
+            "repo": "example-org/incidents",
+            "number": 7,
+            "url": "u",
+            "title": "T",
+            "status": "resolved",
+        },
+        make_current=False,
+    )
+
+
+class FakeTracker:  # pylint: disable=too-few-public-methods
+    """gh for attach and the timeline: one resolved issue and its comments."""
+
+    def __init__(self, world: World):
+        self.world = world
+        self.comments: list[dict] = []
+
+    def __call__(self, args, stdin=None, timeout=None):  # noqa: ARG002  pylint: disable=unused-argument
+        if args[0] == "api":
+            return "\n".join(json.dumps(comment) for comment in self.comments)
+        if args[:2] == ["issue", "comment"]:
+            self.comments.append(
+                {"body": stdin, "created_at": "2026-11-22T00:00:00Z", "author": "agent", "association": "OWNER"}
+            )
+            return "https://example.com/comment/1\n"
+        if args[:2] == ["issue", "view"] and "--jq" in args:
+            return self.world.issues.get(int(args[2]), "OPEN") + "\n"
+        if args[:2] == ["issue", "view"]:
+            body = (
+                f"{incident.MARKER}\n**Severity:** P3 (final)\n**Phase:** Resolved\n"
+                "**Resolved:** x (2026-11-20T00:00:00Z)\n"
+            )
+            return json.dumps(
+                {
+                    "title": "T",
+                    "url": f"https://example.com/i/{args[2]}",
+                    "body": body,
+                    "createdAt": "2026-11-19T00:00:00Z",
+                    "labels": [],
+                }
+            )
+        raise AssertionError(f"unexpected gh call: {args}")
+
+
+class TestRetired:
+    def test_gc_leaves_a_tombstone_naming_the_committed_log(self, world):
+        incident_id = world.incident(7)
+        world.merge_audit(incident_id)
+        world.issues[7] = "CLOSED"
+        count, head = audit_hook.head(incident_id)
+        run_gc(world)
+        tombstone = json.loads(audit_hook.retired_path(incident_id).read_text(encoding="utf-8"))
+        assert (tombstone["records"], tombstone["head"], tombstone["by"]) == (count, head, "gc")
+        assert audit_hook.is_closed(incident_id)
+
+    def test_a_dry_run_retires_nothing(self, world):
+        incident_id = world.incident(7)
+        world.merge_audit(incident_id)
+        world.issues[7] = "CLOSED"
+        run_gc(world, apply=False)
+        assert not audit_hook.retired_path(incident_id).exists()
+
+    def test_a_session_still_bound_after_gc_records_nothing(self, world):
+        incident_id = cleared(world)
+        bind_session(world, incident_id)
+        audit_hook.handle(
+            {"session_id": "late", "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}
+        )
+        assert not audit_hook.spool_path(incident_id).exists(), "catalog-66: the hook re-spooled after gc"
+
+    def test_a_chat_approval_after_gc_is_refused_not_spooled(self, world):
+        incident_id = cleared(world)
+        decision = incident.state_gc.audit.ChatDecision(
+            "approved", "Bash", {"command": "gh issue create"}, "t1", "U1", None
+        )
+        with pytest.raises(sre_common.SiteError, match="attach incidents-7 --reopen"):
+            incident.state_gc.audit.record_chat_decision(incident_id, decision)
+        assert not audit_hook.spool_path(incident_id).exists()
+
+    def test_a_stray_spool_beside_a_tombstone_points_at_discard_not_commit(self, world):
+        incident_id = cleared(world)
+        respool(incident_id)
+        state_gc.retire(incident_id, b"", "attach")
+        reason = run_gc(world)["kept"][0]["reason"]
+        assert "--discard-spool" in reason and "only copy" not in reason
+
+    def test_the_retired_incident_is_not_assessed_again(self, world):
+        cleared(world)
+        result = run_gc(world)
+        assert result["cleared"] == [] and result["kept"] == []
+
+    def test_a_retired_incident_does_not_hold_the_active_marker(self, world):
+        cleared(world)
+        (world.state / "active").write_text("x\n", encoding="utf-8")
+        audit_hook.release_active_marker()
+        assert not (world.state / "active").exists()
+
+
+class TestAttachAfterGc:
+    @pytest.fixture(autouse=True)
+    def tracker(self, world, monkeypatch) -> FakeTracker:
+        fake = FakeTracker(world)
+        monkeypatch.setattr(sre_common, "run_gh", fake)
+        return fake
+
+    @staticmethod
+    def attached(capsys, *argv: str) -> dict:
+        assert incident.main(["attach", *argv]) == 0
+        return json.loads(capsys.readouterr().out.splitlines()[0])
+
+    def test_plain_attach_to_a_retired_incident_arms_nothing(self, world, capsys):
+        incident_id = cleared(world)
+        assert self.attached(capsys, incident_id)["bind"] is None
+        assert not any((world.state / "binds").glob("*")) if (world.state / "binds").is_dir() else True
+
+    def test_attach_backfills_the_tombstone_for_an_incident_gc_cleared_before_the_fix(self, world, capsys):
+        incident_id = cleared(world)
+        audit_hook.retired_path(incident_id).unlink()
+        assert self.attached(capsys, incident_id)["bind"] is None, "catalog-28: re-attach armed capture"
+        assert json.loads(audit_hook.retired_path(incident_id).read_text())["by"] == "attach"
+
+    @pytest.mark.usefixtures("world")
+    def test_attach_with_no_merged_log_still_binds(self, capsys):
+        assert len(self.attached(capsys, "incidents-12")["bind"]) == 32
+        assert not audit_hook.retired_path("incidents-12").exists()
+
+    def test_reopen_after_gc_restores_the_committed_log_and_continues_its_chain(self, world, tracker, capsys):
+        incident_id = cleared(world)
+        merged = (world.site / "audit" / f"{incident_id}.jsonl").read_bytes()
+        assert len(self.attached(capsys, incident_id, "--reopen")["bind"]) == 32
+        assert not audit_hook.is_closed(incident_id)
+        spool = audit_hook.spool_path(incident_id).read_bytes()
+        assert spool.startswith(merged), "a later commit only appends"
+        entries = incident.state_gc.audit.read_log(incident_id)
+        assert incident.state_gc.audit.verify(entries)["chain_intact"]
+        assert entries[-1][1]["event"] == "reopened" and entries[-1][1]["continues"]["records"] == 3
+        assert "Reopened" in tracker.comments[-1]["body"]
+
+    def test_reopen_before_gc_lifts_the_closed_marker_so_capture_resumes(self, world, capsys):
+        incident_id = world.incident(7)
+        self.attached(capsys, incident_id, "--reopen")
+        assert not audit_hook.is_closed(incident_id)
+        assert incident.state_gc.audit.read_log(incident_id)[-1][1]["event"] == "reopened"
+
+    def test_reopen_refuses_to_build_on_a_stray_spool(self, world, capsys):
+        incident_id = cleared(world)
+        respool(incident_id)
+        state_gc.retire(incident_id, b"", "attach")
+        assert incident.main(["attach", incident_id, "--reopen"]) == 2
+        assert "--discard-spool" in capsys.readouterr().err
+        assert audit_hook.is_closed(incident_id)
+
+    def test_reopen_refuses_when_the_committed_log_cannot_be_read(self, world, capsys):
+        incident_id = cleared(world)
+        subprocess.run(["git", "-C", str(world.site), "remote", "remove", "origin"], check=True)
+        subprocess.run(["git", "-C", str(world.site), "update-ref", "-d", "refs/remotes/origin/main"], check=False)
+        assert incident.main(["attach", incident_id, "--reopen"]) == 2
+        assert "not reopening" in capsys.readouterr().err
+        assert audit_hook.is_closed(incident_id) and not audit_hook.spool_path(incident_id).exists()
+
+
+class TestDiscardSpool:
+    @pytest.fixture(autouse=True)
+    def tracker(self, world, monkeypatch) -> FakeTracker:
+        fake = FakeTracker(world)
+        monkeypatch.setattr(sre_common, "run_gh", fake)
+        return fake
+
+    @staticmethod
+    def discard(capsys, *argv: str) -> tuple[int, dict, str]:
+        code = incident.main(["gc", "--no-fetch", "--discard-spool", *argv])
+        captured = capsys.readouterr()
+        return code, (json.loads(captured.out) if captured.out.strip() else {}), captured.err
+
+    def test_dry_run_lists_every_record_it_would_drop_and_deletes_nothing(self, world, capsys):
+        incident_id = cleared(world)
+        respool(incident_id)
+        code, result, err = self.discard(capsys, "--incident", incident_id)
+        assert code == 0 and result["dry_run"] is True and result["discarded"] is False
+        assert [item["command"] for item in result["drop"]] == ["late 0", "late 1"]
+        assert result["merged"]["records"] == 3 and "--apply" in err
+        assert audit_hook.spool_path(incident_id).is_file()
+
+    def test_apply_drops_the_spool_and_retires_the_incident(self, world, capsys):
+        incident_id = cleared(world)
+        respool(incident_id)
+        code, result, _err = self.discard(capsys, "--incident", incident_id, "--apply")
+        assert code == 0 and result["discarded"] is True
+        assert not audit_hook.spool_path(incident_id).exists()
+        assert json.loads(audit_hook.retired_path(incident_id).read_text())["records"] == 3
+        assert (world.site / "audit" / f"{incident_id}.jsonl").is_file(), "the merged log is never touched"
+
+    def test_refused_from_chat(self, world, capsys, monkeypatch):
+        incident_id = cleared(world)
+        respool(incident_id)
+        monkeypatch.setenv(sre_common.NO_CURRENT_ENV, "1")
+        code, _result, err = self.discard(capsys, "--incident", incident_id, "--apply")
+        assert code == 2 and "not allowed from chat" in err
+        assert audit_hook.spool_path(incident_id).is_file()
+
+    @pytest.mark.usefixtures("world")
+    def test_needs_exactly_one_incident(self, capsys):
+        code, _result, err = self.discard(capsys, "--apply")
+        assert code == 2 and "exactly one --incident" in err
+
+    def test_refused_when_the_log_never_merged(self, world, capsys):
+        incident_id = world.incident(7)
+        code, result, _err = self.discard(capsys, "--incident", incident_id, "--apply")
+        assert code == 1 and "not on the audit repository's default branch" in result["reason"]
+        assert audit_hook.spool_path(incident_id).is_file()
+
+    def test_refused_for_a_live_incident(self, world, capsys):
+        incident_id = world.incident(7, resolved=False)
+        world.merge_audit(incident_id)
+        code, result, _err = self.discard(capsys, "--incident", incident_id, "--apply")
+        assert code == 1 and "not resolved" in result["reason"]
+
+    def test_refused_when_the_merged_log_does_not_match_its_pins(self, world, tracker, capsys):
+        incident_id = cleared(world)
+        respool(incident_id)
+        tracker.comments.append(
+            {
+                "body": timeline.render(
+                    "action", "x", sre_common.parse_utc("2026-01-02T03:04:09Z"), "Etc/UTC", (3, "f" * 64)
+                ),
+                "created_at": "2026-01-02T03:04:09Z",
+                "author": "agent",
+                "association": "OWNER",
+            }
+        )
+        code, result, _err = self.discard(capsys, "--incident", incident_id, "--apply")
+        assert code == 1 and "pinned hashes" in result["reason"]
+        assert audit_hook.spool_path(incident_id).is_file()
+
+    def test_passes_when_the_merged_log_matches_its_pins(self, world, tracker, capsys):
+        incident_id = cleared(world)
+        merged = (world.site / "audit" / f"{incident_id}.jsonl").read_text(encoding="utf-8").splitlines()
+        head = hashlib.sha256(merged[-1].encode()).hexdigest()
+        respool(incident_id)
+        tracker.comments.append(
+            {
+                "body": timeline.render(
+                    "action", "x", sre_common.parse_utc("2026-01-02T03:04:09Z"), "Etc/UTC", (3, head)
+                ),
+                "created_at": "2026-01-02T03:04:09Z",
+                "author": "agent",
+                "association": "OWNER",
+            }
+        )
+        code, result, _err = self.discard(capsys, "--incident", incident_id, "--apply")
+        assert code == 0 and result["discarded"] is True

@@ -25,6 +25,7 @@ names match the incident id pattern, inside the state directory, are removed.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import shutil
 import subprocess  # noqa: S404 - fixed argv, no shell
@@ -143,6 +144,40 @@ def preserved(incident_id: str, doc: dict[str, Any], site_root: Path, fetched: s
     return None
 
 
+def merged_log(incident_id: str, doc: dict[str, Any], site_root: Path, fetch: bool = True) -> tuple[bytes | None, str]:
+    """(bytes of the incident's log on the audit repository's default branch or None, branch name or reason)."""
+    try:
+        checkout = audit.audit_checkout(doc, site_root)
+    except SiteError as exc:
+        return None, str(exc)
+    if fetch:
+        _git_bytes(checkout, "fetch", "--quiet", "origin")
+    ref = default_ref(checkout)
+    if ref is None:
+        return None, "the audit repository has no fetched default branch to compare with"
+    code, data = _git_bytes(checkout, "show", f"{ref}:{doc['audit']['path']}/{incident_id}.jsonl")
+    return (data if code == 0 else None), ref.removeprefix("refs/remotes/")
+
+
+def retire(incident_id: str, log: bytes, how: str) -> None:
+    """Leave the tombstone that keeps a committed incident closed once its local files are gone (homelabia#281).
+
+    It names the committed log's length and head so a later look can tell which log was retired. It is
+    never removed by gc; only 'attach --reopen' lifts it.
+    """
+    lines = [line for line in log.decode("utf-8").splitlines() if line.strip()]
+    path = audit_hook.retired_path(incident_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tombstone = {
+        "incident": incident_id,
+        "records": len(lines),
+        "head": hashlib.sha256(lines[-1].encode()).hexdigest() if lines else audit_hook.GENESIS,
+        "retired_at": sre_common.iso_utc(sre_common.utc_now()),
+        "by": how,
+    }
+    path.write_text(json.dumps(tombstone, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def issue_state(incident_id: str, doc: dict[str, Any]) -> str:
     """OPEN or CLOSED. Raises SiteError when it cannot be found out."""
     repo, number = sre_common.split_incident_id(incident_id, doc)
@@ -159,6 +194,11 @@ def _data_blocker(
     state = audit_hook.state_dir()
     spool = audit_hook.spool_path(incident_id)
     info = _read_json(state / "incidents" / f"{incident_id}.json")
+    if spool.is_file() and audit_hook.retired_path(incident_id).exists():
+        return (
+            "a spool started after its log was committed (homelabia#281); a person may drop it with "
+            f"incident.py gc --incident {incident_id} --discard-spool"
+        )
     if spool.is_file() and not spool.with_suffix(".closed").exists():
         return (
             "its audit log was never committed (no .closed marker): this is the only copy. "
@@ -253,6 +293,11 @@ def run(
     tokens = stale_tokens(state, listed, policy.token_days) if only is None else []
     deleted = 0
     if apply:
+        for incident_id in (v["id"] for v in cleared):
+            spool = audit_hook.spool_path(incident_id)
+            if spool.is_file():
+                # Written before anything is deleted: from here on nothing records into this incident again.
+                retire(incident_id, spool.read_bytes(), "gc")
         for path in [*(Path(p) for p in sorted(listed)), *tokens]:
             deleted += _remove(path, state)
         for incident_id in (v["id"] for v in cleared):
@@ -280,3 +325,87 @@ def auto_clean(doc: dict[str, Any], site_root: Path, min_age_days: int = 14) -> 
         return len(run(doc, site_root, policy, apply=True)["cleared"])
     except Exception:  # noqa: BLE001  pylint: disable=broad-exception-caught
         return 0
+
+
+def _summary(line: str) -> dict[str, Any]:
+    """One spool record as a person reads it before it is dropped."""
+    try:
+        record = json.loads(line)
+    except ValueError:
+        record = None
+    if not isinstance(record, dict):
+        return {"unreadable": line[:200]}
+    tool_input = record.get("input") if isinstance(record.get("input"), dict) else {}
+    fields = {
+        "ts": record.get("ts"),
+        "event": record.get("event"),
+        "capture": record.get("capture"),
+        "tool": record.get("tool"),
+        "command": record.get("command") or tool_input.get("command"),
+        "approver": record.get("approver"),
+    }
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+def dropped(spool: bytes, merged: bytes) -> list[dict[str, Any]]:
+    """The spool's records that are not in the merged log: its tail if it extends the log, else all of it."""
+    extra = spool[len(merged) :] if spool.startswith(merged) else spool
+    return [_summary(line) for line in extra.decode("utf-8", errors="replace").splitlines() if line.strip()]
+
+
+def merged_blocker(incident_id: str, doc: dict[str, Any], merged: bytes) -> str | None:
+    """Why the merged log cannot be trusted as the record, or None: chain intact and every timeline pin matches."""
+    entries = [(line, json.loads(line)) for line in merged.decode("utf-8").splitlines() if line.strip()]
+    if not audit.verify(entries)["chain_intact"]:
+        return "the merged log's hash chain is broken; keep the spool and investigate"
+    repo, number = sre_common.split_incident_id(incident_id, doc)
+    anchors = audit.check_anchors(
+        {"id": incident_id, "repo": repo, "number": number}, entries, doc["incident"].get("responders")
+    )
+    if anchors["anchor_mismatches"]:
+        problems = "; ".join(item["problem"] for item in anchors["anchor_mismatches"])
+        return f"the merged log does not match the timeline's pinned hashes ({problems})"
+    return None
+
+
+def discard_spool(
+    incident_id: str, doc: dict[str, Any], site_root: Path, policy: Policy, apply: bool
+) -> dict[str, Any]:
+    """A person's discard of a spool started after the incident's log was committed and merged (homelabia#281).
+
+    Allowed only for a resolved incident whose log is on the audit repository's default branch with an
+    intact chain that matches every hash pinned in its timeline. Lists every record that would go; with
+    apply, retires the incident and deletes its local state. The merged log is never touched.
+    """
+    state = audit_hook.state_dir()
+    spool_file = audit_hook.spool_path(incident_id)
+    result: dict[str, Any] = {"id": incident_id, "dry_run": not apply, "discarded": False}
+    info = _read_json(state / "incidents" / f"{incident_id}.json")
+    if info.get("status", "resolved") != "resolved":
+        result["reason"] = f"the incident is {info.get('status')}, not resolved: its spool is live, not left over"
+        return result
+    if not spool_file.is_file():
+        result["reason"] = "there is no local spool to discard"
+        return result
+    merged, where = merged_log(incident_id, doc, site_root, policy.fetch)
+    if merged is None:
+        result["reason"] = f"the committed log is not on the audit repository's default branch ({where}); keep it"
+        return result
+    try:
+        blocker = merged_blocker(incident_id, doc, merged)
+    except (SiteError, ValueError) as exc:
+        blocker = f"could not check the merged log: {exc}"
+    if blocker:
+        result["reason"] = blocker
+        return result
+    result["merged"] = {"branch": where, "records": len(merged.splitlines())}
+    result["drop"] = dropped(spool_file.read_bytes(), merged)
+    result["files"] = [str(p) for p in files_of(state, incident_id)]
+    if apply:
+        retire(incident_id, merged, "gc --discard-spool")
+        result["deleted"] = sum(_remove(Path(p), state) for p in result["files"])
+        with contextlib.suppress(OSError):
+            (state / "images" / incident_id).rmdir()
+        audit_hook.release_active_marker()
+        result["discarded"] = True
+    return result

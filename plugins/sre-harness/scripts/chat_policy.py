@@ -71,6 +71,8 @@ HARNESS_DENIED_OPTIONS = (
     ("audit.py commit", "--of"),
     ("audit.py commit", "--unr"),
     ("incident.py gc", "--ig"),
+    # Dropping a post-commit spool is a person's decision (homelabia#281); the script refuses it from chat too.
+    ("incident.py gc", "--di"),
 )
 
 # Read-only commands beyond Claude Code's built-in set. Only commands whose

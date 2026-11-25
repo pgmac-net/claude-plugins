@@ -298,6 +298,14 @@ _Avoid_: Typing event, presence
 What follows resolving an incident, in order: commit the audit log, merge its pull request, close the tracking issue, then clear local state with `incident.py gc --apply`. `close` and `dismiss` print the steps still to do.
 _Avoid_: Cleanup, teardown, wrap-up
 
+**Retired incident**:
+An incident whose committed audit log `incident.py gc` proved preserved and whose local state it cleared, leaving only a tombstone (`retired/<id>.json`). It counts as committed: nothing more is recorded for it until `attach --reopen`, which continues the committed log rather than starting a new one (ADR 0028).
+_Avoid_: Archived incident, deleted incident
+
+**Post-commit spool**:
+A spool started for an incident after its log was committed: a new chain, not a damaged copy of the committed one. Since ADR 0028 none is created; one left from before is dropped only by a person with `gc --discard-spool`.
+_Avoid_: Re-spool (informal), lost records
+
 **PIR**:
 A post-incident review: the written analysis of an incident's causes and the actions that follow.
 _Avoid_: Post-mortem, RCA document
